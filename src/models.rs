@@ -1,9 +1,9 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-use crate::schema::posts;
+// use crate::schema::posts;
 
-#[derive(Identifiable, Queryable)]
+// #[derive(Identifiable, Queryable)]
 pub struct Post {
     pub id: i64,
     pub guid: Uuid,
@@ -19,7 +19,7 @@ pub struct Post {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Queryable)]
+// #[derive(Queryable)]
 pub struct PostCategory {
     pub id: i64,
     pub post_id: i64,

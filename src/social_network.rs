@@ -1,8 +1,8 @@
 use std::error::Error;
 use std::rc::Rc;
 
-use diesel::pg::PgConnection;
-use diesel::prelude::*;
+// use diesel::pg::PgConnection;
+// use diesel::prelude::*;
 
 use crate::categories::Category;
 use crate::models::Post;
@@ -18,9 +18,9 @@ pub trait SocialNetwork: Sized {
 
     fn register() -> Result<(), Box<dyn Error>>;
 
-    fn unpublished_posts(connection: &PgConnection) -> QueryResult<Vec<Post>>;
+    // fn unpublished_posts(connection: &PgConnection) -> QueryResult<Vec<Post>>;
 
     fn publish_post(&self, post: &Post, categories: &[Rc<Category>]) -> Result<(), Box<dyn Error>>;
 
-    fn mark_post_published(&self, connection: &PgConnection, post: Post) -> QueryResult<()>;
+    // fn mark_post_published(&self, connection: &PgConnection, post: Post) -> QueryResult<()>;
 }

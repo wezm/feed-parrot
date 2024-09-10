@@ -1,13 +1,13 @@
 #[macro_use]
-extern crate diesel;
-#[macro_use]
 extern crate log;
 
 pub mod categories;
-pub mod db;
+pub mod config;
+// pub mod db;
+pub mod feed;
 pub mod mastodon;
 pub mod models;
-pub mod schema;
+// pub mod schema;
 pub mod social_network;
 #[cfg(twitter)]
 pub mod twitter;

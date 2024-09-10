@@ -5,20 +5,20 @@ use std::error::Error;
 use std::thread;
 use std::time::Duration;
 
-use diesel::{Connection, PgConnection};
-use dotenv::dotenv;
+// use diesel::{Connection, PgConnection};
+// use dotenv::dotenv;
 use env_logger::Env;
 use getopts::Options;
 use log::{debug, error, info};
 
-#[cfg(not(twitter))]
+#[cfg(not(feature = "twitter"))]
 use null_twitter::Twitter;
 use read_rust::categories::Categories;
+use read_rust::env_var;
 use read_rust::mastodon::Mastodon;
 use read_rust::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
 use read_rust::twitter::Twitter;
-use read_rust::{db, env_var};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
@@ -32,7 +32,7 @@ enum Service {
 }
 
 fn main() {
-    dotenv().ok();
+    // dotenv().ok();
 
     if let Err(env::VarError::NotPresent) = env::var(LOG_ENV_VAR) {
         env::set_var(LOG_ENV_VAR, "info");
@@ -109,78 +109,80 @@ fn run(
     toot: bool,
     tweet: bool,
 ) -> Result<(), Box<dyn Error>> {
-    let database_url = env_var("DATABASE_URL")?;
-    let conn = db::establish_connection(&database_url)?;
-    info!("Connected to database, access_mode: {:?}", access_mode);
-
-    let categories = Categories::load();
-
-    // create twiter and masto clients, with appropriate access mode
-    let twitter = Twitter::from_env(access_mode)?;
-    let mastodon = Mastodon::from_env(access_mode)?;
-
-    debug!("Entering main loop");
-    let term = Arc::new(AtomicBool::new(false));
-    signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&term))?;
-    signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&term))?;
-
-    while !term.load(Ordering::Relaxed) {
-        if toot {
-            debug!("Checking for new posts to toot");
-            if let Err(err) = announce_new_posts(&mastodon, &conn, &categories) {
-                // TODO: Log Sentry error
-                error!("Error tooting new posts: {}", err);
-            }
-        }
-        if term.load(Ordering::Relaxed) {
-            break;
-        }
-        if tweet {
-            debug!("Checking for new posts to tweet");
-            if let Err(err) = announce_new_posts(&twitter, &conn, &categories) {
-                error!("Error tweeting new posts: {}", err);
-            }
-        }
-
-        if !doloop {
-            break;
-        }
-        for _ in 0..SLEEP_TIME {
-            if term.load(Ordering::Relaxed) {
-                break;
-            }
-            thread::sleep(ONE_SECOND);
-        }
-    }
-
-    Ok(())
+    // let database_url = env_var("DATABASE_URL")?;
+    // let conn = db::establish_connection(&database_url)?;
+    // info!("Connected to database, access_mode: {:?}", access_mode);
+    //
+    // let categories = Categories::load();
+    //
+    // // create twiter and masto clients, with appropriate access mode
+    // let twitter = Twitter::from_env(access_mode)?;
+    // let mastodon = Mastodon::from_env(access_mode)?;
+    //
+    // debug!("Entering main loop");
+    // let term = Arc::new(AtomicBool::new(false));
+    // signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&term))?;
+    // signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&term))?;
+    //
+    // while !term.load(Ordering::Relaxed) {
+    //     if toot {
+    //         debug!("Checking for new posts to toot");
+    //         if let Err(err) = announce_new_posts(&mastodon, &conn, &categories) {
+    //             // TODO: Log Sentry error
+    //             error!("Error tooting new posts: {}", err);
+    //         }
+    //     }
+    //     if term.load(Ordering::Relaxed) {
+    //         break;
+    //     }
+    //     if tweet {
+    //         debug!("Checking for new posts to tweet");
+    //         if let Err(err) = announce_new_posts(&twitter, &conn, &categories) {
+    //             error!("Error tweeting new posts: {}", err);
+    //         }
+    //     }
+    //
+    //     if !doloop {
+    //         break;
+    //     }
+    //     for _ in 0..SLEEP_TIME {
+    //         if term.load(Ordering::Relaxed) {
+    //             break;
+    //         }
+    //         thread::sleep(ONE_SECOND);
+    //     }
+    // }
+    //
+    // Ok(())
+    todo!()
 }
 
 fn announce_new_posts<S: SocialNetwork>(
     network: &S,
-    conn: &PgConnection,
+    // conn: &PgConnection,
     categories: &Categories,
 ) -> Result<(), Box<dyn Error>> {
-    for post in <S as SocialNetwork>::unpublished_posts(conn)? {
-        let post_id = post.id;
-        info!("New post to announce: [{}] {}", post_id, post.title);
-        let toot_result = db::post_categories(conn, &post, categories)
-            .map_err(|err| err.into())
-            .and_then(|post_categories| {
-                conn.transaction::<_, Box<dyn Error>, _>(|| {
-                    network.publish_post(&post, &post_categories)?;
-                    network.mark_post_published(conn, post)?;
-
-                    Ok(())
-                })
-            });
-
-        if let Err(err) = toot_result {
-            error!("Unable to announce post [{}]: {}", post_id, err);
-        }
-    }
-
-    Ok(())
+    // for post in <S as SocialNetwork>::unpublished_posts(conn)? {
+    //     let post_id = post.id;
+    //     info!("New post to announce: [{}] {}", post_id, post.title);
+    //     let toot_result = db::post_categories(conn, &post, categories)
+    //         .map_err(|err| err.into())
+    //         .and_then(|post_categories| {
+    //             conn.transaction::<_, Box<dyn Error>, _>(|| {
+    //                 network.publish_post(&post, &post_categories)?;
+    //                 network.mark_post_published(conn, post)?;
+    //
+    //                 Ok(())
+    //             })
+    //         });
+    //
+    //     if let Err(err) = toot_result {
+    //         error!("Unable to announce post [{}]: {}", post_id, err);
+    //     }
+    // }
+    //
+    // Ok(())
+    todo!()
 }
 
 fn register(service: Service) -> Result<(), Box<dyn Error>> {
@@ -206,11 +208,11 @@ mod null_twitter {
             Err(String::from("Twitter support is not enabled").into())
         }
 
-        fn unpublished_posts(
-            _connection: &diesel::PgConnection,
-        ) -> diesel::QueryResult<Vec<read_rust::models::Post>> {
-            unimplemented!("Twitter support is not enabled")
-        }
+        // fn unpublished_posts(
+        //     _connection: &diesel::PgConnection,
+        // ) -> diesel::QueryResult<Vec<read_rust::models::Post>> {
+        //     unimplemented!("Twitter support is not enabled")
+        // }
 
         fn publish_post(
             &self,
@@ -220,12 +222,12 @@ mod null_twitter {
             Err(String::from("Twitter support is not enabled").into())
         }
 
-        fn mark_post_published(
-            &self,
-            _connection: &diesel::PgConnection,
-            _post: read_rust::models::Post,
-        ) -> diesel::QueryResult<()> {
-            unimplemented!("Twitter support is not enabled")
-        }
+        // fn mark_post_published(
+        //     &self,
+        //     _connection: &diesel::PgConnection,
+        //     _post: read_rust::models::Post,
+        // ) -> diesel::QueryResult<()> {
+        //     unimplemented!("Twitter support is not enabled")
+        // }
     }
 }

@@ -3,7 +3,7 @@ use std::rc::Rc;
 use serde::Deserialize;
 use serde_json;
 
-const JSON: &str = include_str!("../../content/_data/categories.json");
+const JSON: &str = "{}";
 
 #[derive(Debug, Deserialize)]
 pub struct Category {
