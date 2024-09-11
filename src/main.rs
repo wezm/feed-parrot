@@ -13,16 +13,16 @@ use log::{debug, error, info};
 
 #[cfg(not(feature = "twitter"))]
 use null_twitter::Twitter;
-use read_rust::categories::Categories;
-use read_rust::env_var;
-use read_rust::mastodon::Mastodon;
-use read_rust::social_network::{AccessMode, SocialNetwork};
+use feed_parrot::categories::Categories;
+use feed_parrot::env_var;
+use feed_parrot::mastodon::Mastodon;
+use feed_parrot::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
-use read_rust::twitter::Twitter;
+use feed_parrot::twitter::Twitter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-const LOG_ENV_VAR: &str = "READRUST_LOG";
+const LOG_ENV_VAR: &str = "FEED_PARROT_LOG";
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const SLEEP_TIME: usize = 600; // 10 minutes
 
@@ -193,13 +193,13 @@ fn register(service: Service) -> Result<(), Box<dyn Error>> {
 }
 
 mod null_twitter {
-    use read_rust::social_network::SocialNetwork;
+    use feed_parrot::social_network::SocialNetwork;
 
     pub struct Twitter;
 
     impl SocialNetwork for Twitter {
         fn from_env(
-            _access_mode: read_rust::social_network::AccessMode,
+            _access_mode: feed_parrot::social_network::AccessMode,
         ) -> Result<Self, Box<dyn std::error::Error>> {
             Ok(Twitter)
         }
@@ -210,14 +210,14 @@ mod null_twitter {
 
         // fn unpublished_posts(
         //     _connection: &diesel::PgConnection,
-        // ) -> diesel::QueryResult<Vec<read_rust::models::Post>> {
+        // ) -> diesel::QueryResult<Vec<feed_parrot::models::Post>> {
         //     unimplemented!("Twitter support is not enabled")
         // }
 
         fn publish_post(
             &self,
-            _post: &read_rust::models::Post,
-            _categories: &[std::rc::Rc<read_rust::categories::Category>],
+            _post: &feed_parrot::models::Post,
+            _categories: &[std::rc::Rc<feed_parrot::categories::Category>],
         ) -> Result<(), Box<dyn std::error::Error>> {
             Err(String::from("Twitter support is not enabled").into())
         }
@@ -225,7 +225,7 @@ mod null_twitter {
         // fn mark_post_published(
         //     &self,
         //     _connection: &diesel::PgConnection,
-        //     _post: read_rust::models::Post,
+        //     _post: feed_parrot::models::Post,
         // ) -> diesel::QueryResult<()> {
         //     unimplemented!("Twitter support is not enabled")
         // }
