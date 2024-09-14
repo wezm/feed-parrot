@@ -6,6 +6,7 @@ use std::sync::Arc;
 
 use atom_syndication as atom;
 use blake3::Hash;
+use chrono::{DateTime, Utc};
 // use lockable::LockPool;
 use mime::Mime;
 use redb::{Database, DatabaseError, WriteTransaction};
@@ -20,8 +21,6 @@ use reqwest::StatusCode;
 use rss::Channel;
 // use sqlx::postgres::PgListener;
 // use sqlx::{Connection, PgConnection, PgPool};
-use time::format_description::well_known::Rfc2822;
-use time::OffsetDateTime;
 use tokio::sync::mpsc::Sender;
 use url::Url;
 // use tracing::{debug, error, event, info, instrument, Level};
@@ -97,7 +96,7 @@ impl HashedData {
 }
 
 struct CrawlOutcome {
-    refreshed_at: OffsetDateTime,
+    refreshed_at: DateTime<Utc>,
     data: FeedData<HashedData>,
     headers: HeaderMap,
 }
@@ -377,7 +376,7 @@ async fn fetch_feed(client: &reqwest::Client, feed: &Feed) -> Result<CrawlOutcom
     let mut headers = HeaderMap::new();
     let last_modified = feed
         .last_modified
-        .and_then(|d| d.format(&Rfc2822).ok())
+        .map(|d| d.to_rfc2822())
         .and_then(|val| val.parse::<HeaderValue>().ok());
     if let Some(last_modified) = last_modified {
         headers.insert(IF_MODIFIED_SINCE, last_modified);
@@ -390,7 +389,7 @@ async fn fetch_feed(client: &reqwest::Client, feed: &Feed) -> Result<CrawlOutcom
         .headers(headers)
         .send()
         .await?;
-    let refreshed_at = OffsetDateTime::now_utc();
+    let refreshed_at = Utc::now();
 
     // Check if not modified
     // info!(status = response.status().as_u16());
@@ -461,7 +460,8 @@ async fn update_feed_cache_keys(
     let last_modified = headers
         .get(LAST_MODIFIED)
         .and_then(|val| val.to_str().ok())
-        .and_then(|last_mod| OffsetDateTime::parse(last_mod, &Rfc2822).ok());
+        .and_then(|last_mod| DateTime::parse_from_rfc2822(last_mod).ok())
+        .map(|date| date.to_utc());
 
     feed.etag = etag.map(ToString::to_string);
     feed.last_modified = last_modified;

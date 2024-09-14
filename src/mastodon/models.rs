@@ -1,9 +1,9 @@
 use std::fmt;
 
+use chrono::{DateTime, Utc};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer};
 use std::str::FromStr;
-use time::OffsetDateTime;
 
 #[derive(Deserialize)]
 pub(crate) struct Status {
@@ -14,8 +14,9 @@ pub(crate) struct Status {
     #[serde(default)]
     media_attachments: Vec<MediaAttachment>,
     pub reblog: Option<Reblog>,
-    #[serde(with = "time::serde::iso8601")]
-    pub created_at: OffsetDateTime,
+    // Mastodon specifies this as "ISO 8601 Datetime". RFC3339 is a profile of that.
+    #[serde(with = "rfc3339")]
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Deserialize)]
@@ -70,4 +71,49 @@ where
     }
 
     deserializer.deserialize_str(IdVisitor)
+}
+
+mod rfc3339 {
+    use std::fmt;
+
+    use chrono::{DateTime, Utc};
+    use serde::{
+        de::{self, Visitor},
+        Deserializer, Serialize, Serializer,
+    };
+
+    /// Serialize a `DateTime<Utc>` into RFC3339 representation.
+    pub fn serialize<S: Serializer>(
+        datetime: &DateTime<Utc>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        datetime.to_rfc3339().serialize(serializer)
+    }
+
+    /// Deserialize a `DateTime<Utc>` from RFC3339 representation.
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct Rfc3339Visitor;
+
+        impl<'de> Visitor<'de> for Rfc3339Visitor {
+            type Value = DateTime<Utc>;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                formatter.write_str("an RFC3339 datetime")
+            }
+
+            fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                DateTime::parse_from_rfc3339(value)
+                    .map(|date| date.to_utc())
+                    .map_err(de::Error::custom)
+            }
+        }
+
+        deserializer.deserialize_str(Rfc3339Visitor)
+    }
 }

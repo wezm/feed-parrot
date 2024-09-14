@@ -1,8 +1,8 @@
 use std::path::Path;
 
+use chrono::{DateTime, Utc};
 use redb::{Database, DatabaseError, TableDefinition, WriteTransaction};
 use serde::{Deserialize, Serialize};
-use time::OffsetDateTime;
 use url::Url;
 
 const HASH_LEN: usize = 32;
@@ -26,14 +26,14 @@ pub struct Feed {
     // pub title: String,
     pub url: Url,
     pub etag: Option<String>,
-    pub last_modified: Option<OffsetDateTime>,
+    pub last_modified: Option<DateTime<Utc>>,
     pub last_refresh_hash: Option<[u8; HASH_LEN]>,
 }
 
 pub struct Tooted {
     pub guid: String,
     pub status: String,
-    pub at: OffsetDateTime,
+    pub at: DateTime<Utc>,
 }
 
 pub fn establish_connection<P: AsRef<Path>>(database_path: P) -> Result<Database, DatabaseError> {
@@ -102,8 +102,8 @@ pub fn mark_post_tooted(db: &Database, toot: Tooted) -> Result<(), redb::Error> 
         let mut tooted_table = write_txn.open_table(TOOTED_TABLE)?;
         let mut toots_table = write_txn.open_table(TOOTS_TABLE)?;
         let hash = blake3::hash(toot.status.as_bytes());
-        tooted_table.insert(toot.guid.as_str(), toot.at.unix_timestamp())?;
-        toots_table.insert(hash.as_bytes(), toot.at.unix_timestamp())?;
+        tooted_table.insert(toot.guid.as_str(), toot.at.timestamp())?;
+        toots_table.insert(hash.as_bytes(), toot.at.timestamp())?;
     }
     write_txn.commit()?;
     Ok(())
