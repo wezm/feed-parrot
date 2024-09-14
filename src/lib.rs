@@ -3,7 +3,7 @@ extern crate log;
 
 pub mod categories;
 pub mod config;
-// pub mod db;
+pub mod db;
 pub mod feed;
 pub mod mastodon;
 pub mod models;
@@ -11,6 +11,8 @@ pub mod models;
 pub mod social_network;
 #[cfg(twitter)]
 pub mod twitter;
+// mod crawler;
+// mod json_feed;
 
 use std::env::VarError;
 use std::ffi::OsStr;

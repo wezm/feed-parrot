@@ -1,72 +1,110 @@
-use std::rc::Rc;
+use std::path::Path;
 
-use diesel::pg::PgConnection;
-use diesel::prelude::*;
+use redb::{Database, DatabaseError, TableDefinition};
+use serde::{Deserialize, Serialize};
+use time::OffsetDateTime;
+use url::Url;
 
-use crate::categories::{Categories, Category};
-use crate::models::Post;
-use crate::models::PostCategory;
+const HASH_LEN: usize = 32;
 
-const BATCH_SIZE: i64 = 1;
+// item guid -> timestamp
+//
+// This table is used to quickly check if a feed entry has been posted before.
+const TOOTED_TABLE: TableDefinition<&str, i64> = TableDefinition::new("tooted");
 
-pub fn establish_connection(database_url: &str) -> Result<PgConnection, ConnectionError> {
-    PgConnection::establish(database_url)
+// hash of toot -> timestamp
+//
+// This table is a last defence against posting a duplicate post. The key is a hash of
+// the toot content, which if it exists suggests duplicate content.
+const TOOTS_TABLE: TableDefinition<[u8; HASH_LEN], i64> = TableDefinition::new("toots");
+
+// feed url -> Feed MessagePack
+const FEED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("feed");
+
+#[derive(Serialize, Deserialize)]
+pub struct Feed {
+    // pub title: String,
+    pub url: Url,
+    pub etag: Option<String>,
+    pub last_modified: Option<OffsetDateTime>,
+    pub last_refresh_hash: Option<Vec<u8>>,
 }
 
-pub fn untooted_posts(connection: &PgConnection) -> QueryResult<Vec<Post>> {
-    use crate::schema::posts::dsl::*;
-
-    posts
-        .filter(tooted_at.is_null())
-        .order_by(created_at.asc())
-        .limit(BATCH_SIZE)
-        .load::<Post>(connection)
+pub struct Tooted {
+    pub guid: String,
+    pub status: String,
+    pub at: OffsetDateTime,
 }
 
-pub fn mark_post_tooted(connection: &PgConnection, post: Post) -> QueryResult<()> {
-    use crate::schema::posts;
-    use diesel::expression::dsl::now;
-
-    diesel::update(&post)
-        .set(posts::tooted_at.eq(now))
-        .execute(connection)
-        .map(|_rows_updated| ())
+pub fn establish_connection<P: AsRef<Path>>(database_path: P) -> Result<Database, DatabaseError> {
+    Database::create(database_path)
 }
 
-pub fn untweeted_posts(connection: &PgConnection) -> QueryResult<Vec<Post>> {
-    use crate::schema::posts::dsl::*;
+pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(FEED_TABLE)?;
 
-    posts
-        .filter(tweeted_at.is_null())
-        .order_by(created_at.asc())
-        .limit(BATCH_SIZE)
-        .load::<Post>(connection)
+    let access = table.get(feed_url.as_str())?;
+    let Some(data) = access.as_ref().map(|guard| guard.value()) else {
+        return Ok(Feed {
+            url: feed_url.clone(),
+            etag: None,
+            last_modified: None,
+            last_refresh_hash: None,
+        });
+    };
+
+    let feed = rmp_serde::from_slice::<Feed>(data).expect("FIXME: unable to deserialize feed");
+
+    Ok(feed)
 }
 
-pub fn mark_post_tweeted(connection: &PgConnection, post: Post) -> QueryResult<()> {
-    use crate::schema::posts;
-    use diesel::expression::dsl::now;
-
-    diesel::update(&post)
-        .set(posts::tweeted_at.eq(now))
-        .execute(connection)
-        .map(|_rows_updated| ())
+pub fn save_feed(db: &Database, feed: &Feed) -> Result<(), redb::Error> {
+    let write_txn = db.begin_write()?;
+    {
+        let mut table = write_txn.open_table(FEED_TABLE)?;
+        let serialised = rmp_serde::to_vec(feed).expect("FIXME: unable to serialise feed");
+        table.insert(feed.url.as_str(), serialised.as_slice())?;
+    }
+    write_txn.commit()?;
+    Ok(())
 }
 
-pub fn post_categories(
-    connection: &PgConnection,
-    post: &Post,
-    categories: &Categories,
-) -> QueryResult<Vec<Rc<Category>>> {
-    use crate::schema::post_categories::dsl::*;
+/// Checks if the supplied content has been tooted before.
+///
+/// Returns `true` if tooted before.
+pub fn already_tooted(db: &Database, content: &str) -> Result<bool, redb::Error> {
+    let hash = blake3::hash(content.as_bytes());
 
-    let category_ids = post_categories
-        .filter(post_id.eq(post.id))
-        .load::<PostCategory>(connection)?
-        .into_iter()
-        .map(|post_category| post_category.category_id);
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(TOOTS_TABLE)?;
+    table
+        .get(hash.as_bytes())
+        .map(|access| access.is_some())
+        .map_err(redb::Error::from)
+}
 
-    categories
-        .with_ids(category_ids)
-        .ok_or(diesel::result::Error::NotFound)
+/// Checks if the supplied feed item guid has been tooted before.
+///
+/// Returns `true` if tooted before.
+pub fn item_tooted(db: &Database, guid: &str) -> Result<bool, redb::Error> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(TOOTED_TABLE)?;
+    table
+        .get(guid)
+        .map(|access| access.is_some())
+        .map_err(redb::Error::from)
+}
+
+pub fn mark_post_tooted(db: &Database, toot: Tooted) -> Result<(), redb::Error> {
+    let write_txn = db.begin_write()?;
+    {
+        let mut tooted_table = write_txn.open_table(TOOTED_TABLE)?;
+        let mut toots_table = write_txn.open_table(TOOTS_TABLE)?;
+        let hash = blake3::hash(toot.status.as_bytes());
+        tooted_table.insert(toot.guid.as_str(), toot.at.unix_timestamp())?;
+        toots_table.insert(hash.as_bytes(), toot.at.unix_timestamp())?;
+    }
+    write_txn.commit()?;
+    Ok(())
 }
