@@ -11,14 +11,14 @@ use env_logger::Env;
 use getopts::Options;
 use log::{debug, error, info};
 
-#[cfg(not(feature = "twitter"))]
-use null_twitter::Twitter;
 use feed_parrot::categories::Categories;
 use feed_parrot::env_var;
 use feed_parrot::mastodon::Mastodon;
 use feed_parrot::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
 use feed_parrot::twitter::Twitter;
+#[cfg(not(feature = "twitter"))]
+use null_twitter::Twitter;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 

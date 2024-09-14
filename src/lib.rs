@@ -8,11 +8,11 @@ pub mod feed;
 pub mod mastodon;
 pub mod models;
 // pub mod schema;
+mod crawler;
+mod json_feed;
 pub mod social_network;
 #[cfg(twitter)]
 pub mod twitter;
-// mod crawler;
-mod json_feed;
 
 use std::env::VarError;
 use std::ffi::OsStr;

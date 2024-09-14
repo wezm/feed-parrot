@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use redb::{Database, DatabaseError, TableDefinition};
+use redb::{Database, DatabaseError, TableDefinition, WriteTransaction};
 use serde::{Deserialize, Serialize};
 use time::OffsetDateTime;
 use url::Url;
@@ -27,7 +27,7 @@ pub struct Feed {
     pub url: Url,
     pub etag: Option<String>,
     pub last_modified: Option<OffsetDateTime>,
-    pub last_refresh_hash: Option<Vec<u8>>,
+    pub last_refresh_hash: Option<[u8; HASH_LEN]>,
 }
 
 pub struct Tooted {
@@ -59,14 +59,14 @@ pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
     Ok(feed)
 }
 
-pub fn save_feed(db: &Database, feed: &Feed) -> Result<(), redb::Error> {
-    let write_txn = db.begin_write()?;
-    {
-        let mut table = write_txn.open_table(FEED_TABLE)?;
-        let serialised = rmp_serde::to_vec(feed).expect("FIXME: unable to serialise feed");
-        table.insert(feed.url.as_str(), serialised.as_slice())?;
-    }
-    write_txn.commit()?;
+pub fn save_feed(tx: &mut WriteTransaction, feed: &Feed) -> Result<(), redb::Error> {
+    // let write_txn = db.begin_write()?;
+    // {
+    let mut table = tx.open_table(FEED_TABLE)?;
+    let serialised = rmp_serde::to_vec(feed).expect("FIXME: unable to serialise feed");
+    table.insert(feed.url.as_str(), serialised.as_slice())?;
+    // }
+    // write_txn.commit()?;
     Ok(())
 }
 
