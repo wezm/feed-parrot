@@ -12,7 +12,7 @@ pub mod social_network;
 #[cfg(twitter)]
 pub mod twitter;
 // mod crawler;
-// mod json_feed;
+mod json_feed;
 
 use std::env::VarError;
 use std::ffi::OsStr;
