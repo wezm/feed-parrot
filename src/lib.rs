@@ -34,7 +34,7 @@ pub fn env_var<K: AsRef<OsStr>>(key: K) -> Result<String, ErrorMessage> {
 }
 
 #[derive(Debug, Eq, PartialEq)]
-struct Delay(Duration);
+pub struct Delay(Duration);
 
 #[derive(Debug)]
 pub struct ErrorMessage(pub String);
@@ -46,6 +46,13 @@ impl fmt::Display for ErrorMessage {
 }
 
 impl std::error::Error for ErrorMessage {}
+
+impl Delay {
+    pub fn from_secs(secs: u16) -> Self {
+        Delay(Duration::from_secs(secs.into()))
+    }
+}
+
 impl FromStr for Delay {
     type Err = String;
 

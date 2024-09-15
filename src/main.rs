@@ -17,11 +17,11 @@ use env_logger::Env;
 use getopts::Options;
 use log::{debug, error, info};
 
-use feed_parrot::categories::Categories;
 use feed_parrot::mastodon::Mastodon;
 use feed_parrot::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
 use feed_parrot::twitter::Twitter;
+use feed_parrot::Delay;
 #[cfg(not(feature = "twitter"))]
 use null_twitter::Twitter;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -76,6 +76,11 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     } else {
         AccessMode::ReadWrite
     };
+
+    let wait = matches
+        .opt_get("w")?
+        .unwrap_or_else(|| Delay::from_secs(60));
+    dbg!(wait);
 
     let db_path = match env::var(DATABASE_ENV_VAR) {
         Ok(path) => Some(path),

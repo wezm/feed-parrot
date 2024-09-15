@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use redb::{Database, DatabaseError, ReadableTable, TableDefinition, WriteTransaction};
+use redb::{Database, DatabaseError, ReadableTable, TableDefinition, TableError, WriteTransaction};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -76,7 +76,11 @@ pub fn load_services(
     services: &Services,
 ) -> Result<Vec<ServiceData>, Box<dyn std::error::Error>> {
     let read_txn = db.begin_read()?;
-    let table = read_txn.open_table(SERVICE_TABLE)?;
+    let table = match read_txn.open_table(SERVICE_TABLE) {
+        Ok(table) => table,
+        Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
 
     let results = match services {
         Services::All => table
