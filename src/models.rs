@@ -1,3 +1,6 @@
+use std::fmt;
+use std::str::FromStr;
+
 use chrono::{DateTime, Utc};
 
 // use crate::schema::posts;
@@ -22,4 +25,48 @@ pub struct PostCategory {
     pub id: i64,
     pub post_id: i64,
     pub category_id: i16,
+}
+
+#[derive(Clone, Copy)]
+pub enum Service {
+    Mastodon = 1,
+    Twitter = 2,
+}
+
+pub enum Services {
+    All,
+    Specific(Vec<Service>),
+}
+
+impl TryFrom<u8> for Service {
+    type Error = &'static str;
+
+    fn try_from(value: u8) -> Result<Self, Self::Error> {
+        match value {
+            1 => Ok(Service::Mastodon),
+            2 => Ok(Service::Twitter),
+            _ => Err("invalid service number"),
+        }
+    }
+}
+
+impl FromStr for Service {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "mastodon" => Ok(Service::Mastodon),
+            "twitter" => Ok(Service::Twitter),
+            _ => Err(format!("'{s}' is not a known service")),
+        }
+    }
+}
+
+impl fmt::Display for Service {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Service::Mastodon => f.write_str("Mastodon"),
+            Service::Twitter => f.write_str("Twitter"),
+        }
+    }
 }

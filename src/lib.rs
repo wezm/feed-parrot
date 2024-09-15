@@ -11,7 +11,7 @@ pub mod models;
 mod crawler;
 mod json_feed;
 pub mod social_network;
-#[cfg(twitter)]
+#[cfg(feature = "twitter")]
 pub mod twitter;
 
 use std::env::VarError;

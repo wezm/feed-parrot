@@ -1,11 +1,18 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
-use redb::{Database, DatabaseError, TableDefinition, WriteTransaction};
+use redb::{Database, DatabaseError, ReadableTable, TableDefinition, WriteTransaction};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use crate::models::{Service, Services};
+
 const HASH_LEN: usize = 32;
+
+// service name -> configuration/tokens MessagePack
+//
+// This table is used to store the auth tokens etc, for a service.
+const SERVICE_TABLE: TableDefinition<u8, &[u8]> = TableDefinition::new("services");
 
 // item guid -> timestamp
 //
@@ -16,10 +23,10 @@ const TOOTED_TABLE: TableDefinition<&str, i64> = TableDefinition::new("tooted");
 //
 // This table is a last defence against posting a duplicate post. The key is a hash of
 // the toot content, which if it exists suggests duplicate content.
-const TOOTS_TABLE: TableDefinition<[u8; HASH_LEN], i64> = TableDefinition::new("toots");
+const TOOT_TABLE: TableDefinition<[u8; HASH_LEN], i64> = TableDefinition::new("toots");
 
 // feed url -> Feed MessagePack
-const FEED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("feed");
+const FEED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
 
 #[derive(Serialize, Deserialize)]
 pub struct Feed {
@@ -34,6 +41,11 @@ pub struct Tooted {
     pub guid: String,
     pub status: String,
     pub at: DateTime<Utc>,
+}
+
+pub struct ServiceData {
+    service: Service,
+    data: Vec<u8>,
 }
 
 pub fn establish_connection<P: AsRef<Path>>(database_path: P) -> Result<Database, DatabaseError> {
@@ -59,6 +71,43 @@ pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
     Ok(feed)
 }
 
+pub fn load_services(
+    db: &Database,
+    services: &Services,
+) -> Result<Vec<ServiceData>, Box<dyn std::error::Error>> {
+    let read_txn = db.begin_read()?;
+    let table = read_txn.open_table(SERVICE_TABLE)?;
+
+    let results = match services {
+        Services::All => table
+            .iter()?
+            .map(|item| {
+                let (k, v) = item?;
+                let service = Service::try_from(k.value())?;
+                Ok(ServiceData {
+                    service,
+                    data: v.value().to_vec(),
+                })
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
+        Services::Specific(specified) => specified
+            .iter()
+            .copied()
+            .map(|service| {
+                let item = table
+                    .get(service as u8)?
+                    .ok_or_else(|| format!("{} is not configured", service))?;
+                Ok(ServiceData {
+                    service,
+                    data: item.value().to_vec(),
+                })
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
+    };
+
+    Ok(results)
+}
+
 pub fn save_feed(tx: &mut WriteTransaction, feed: &Feed) -> Result<(), redb::Error> {
     // let write_txn = db.begin_write()?;
     // {
@@ -77,7 +126,7 @@ pub fn already_tooted(db: &Database, content: &str) -> Result<bool, redb::Error>
     let hash = blake3::hash(content.as_bytes());
 
     let read_txn = db.begin_read()?;
-    let table = read_txn.open_table(TOOTS_TABLE)?;
+    let table = read_txn.open_table(TOOT_TABLE)?;
     table
         .get(hash.as_bytes())
         .map(|access| access.is_some())
@@ -100,7 +149,7 @@ pub fn mark_post_tooted(db: &Database, toot: Tooted) -> Result<(), redb::Error> 
     let write_txn = db.begin_write()?;
     {
         let mut tooted_table = write_txn.open_table(TOOTED_TABLE)?;
-        let mut toots_table = write_txn.open_table(TOOTS_TABLE)?;
+        let mut toots_table = write_txn.open_table(TOOT_TABLE)?;
         let hash = blake3::hash(toot.status.as_bytes());
         tooted_table.insert(toot.guid.as_str(), toot.at.timestamp())?;
         toots_table.insert(hash.as_bytes(), toot.at.timestamp())?;

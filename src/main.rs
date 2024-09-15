@@ -1,9 +1,15 @@
 use env_logger;
+use feed_parrot::db;
+use feed_parrot::models::{Service, Services};
+use redb::Database;
+use url::Url;
 
-use std::env;
+use std::env::{self, VarError};
 use std::error::Error;
-use std::thread;
+use std::process::ExitCode;
+use std::str::FromStr;
 use std::time::Duration;
+use std::{process, thread};
 
 // use diesel::{Connection, PgConnection};
 // use dotenv::dotenv;
@@ -12,7 +18,6 @@ use getopts::Options;
 use log::{debug, error, info};
 
 use feed_parrot::categories::Categories;
-use feed_parrot::env_var;
 use feed_parrot::mastodon::Mastodon;
 use feed_parrot::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
@@ -23,17 +28,21 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
 const LOG_ENV_VAR: &str = "FEED_PARROT_LOG";
+const DATABASE_ENV_VAR: &str = "FEED_PARROT_DATABASE";
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const SLEEP_TIME: usize = 600; // 10 minutes
 
-enum Service {
-    Twitter,
-    Mastodon,
+fn main() -> ExitCode {
+    match try_main() {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("Error: {err}");
+            ExitCode::FAILURE
+        }
+    }
 }
 
-fn main() {
-    // dotenv().ok();
-
+fn try_main() -> Result<(), Box<dyn Error>> {
     if let Err(env::VarError::NotPresent) = env::var(LOG_ENV_VAR) {
         env::set_var(LOG_ENV_VAR, "info");
     }
@@ -45,23 +54,22 @@ fn main() {
     let program = args[0].clone();
 
     let mut opts = Options::new();
-    opts.optflag("n", "dryrun", "don't post statuses of update the db");
-    opts.optflag("t", "toot", "toot new posts");
-    opts.optflag("w", "tweet", "tweet new posts");
-    opts.optflag("l", "loop", "enter loop checking for new posts");
-    opts.optflag(
-        "r",
-        "register",
-        "retrieve Twitter or Mastodon tokens (requires -t or -w as well)",
+    opts.optopt("d", "database", "path to database file", "FILE");
+    opts.optflag("n", "dryrun", "don't post statuses or update the db");
+    opts.optmulti("s", "service", "filter action by service", "SERVICE");
+    opts.optopt(
+        "w",
+        "wait",
+        "time to wait between posting new items",
+        "DURATION",
     );
-    opts.optflag("h", "help", "print this help menu");
-    let matches = match opts.parse(&args[1..]) {
-        Ok(m) => m,
-        Err(f) => panic!("{}", f),
-    };
+    opts.optflag("r", "register", "register with a service (requires -s)");
+    opts.optflag("h", "help", "print this help information");
+    let matches = opts.parse(&args[1..])?;
+
     if matches.opt_present("h") {
         print_usage(&program, &opts);
-        return;
+        return Ok(());
     }
     let access_mode = if matches.opt_present("n") {
         AccessMode::ReadOnly
@@ -69,32 +77,49 @@ fn main() {
         AccessMode::ReadWrite
     };
 
-    if matches.opt_present("r") {
-        let service = match (matches.opt_present("t"), matches.opt_present("w")) {
-            (false, false) => {
-                eprintln!("One of -t or -w is needed with -r");
-                std::process::exit(1);
-            }
-            (true, false) => Service::Mastodon,
-            (false, true) => Service::Twitter,
-            (true, true) => {
-                eprintln!("Only one of -t or -w is allowed with -r");
-                std::process::exit(1);
-            }
-        };
-
-        if let Err(err) = register(service) {
-            error!("Registration Error: {}", err);
-            std::process::exit(1);
+    let db_path = match env::var(DATABASE_ENV_VAR) {
+        Ok(path) => Some(path),
+        Err(VarError::NotPresent) => matches.opt_str("d").map(|v| v.to_string()),
+        Err(err) => {
+            // FIXME: Return error
+            eprintln!(
+                "Error reading {} environment variable: {err}",
+                DATABASE_ENV_VAR
+            );
+            process::exit(1);
         }
-    } else if let Err(err) = run(
-        access_mode,
-        matches.opt_present("l"),
-        matches.opt_present("t"),
-        matches.opt_present("w"),
-    ) {
-        error!("Fatal Error: {}", err);
-        std::process::exit(1);
+    };
+    let Some(db_path) = db_path else {
+        // FIXME: Return error
+        eprintln!(
+            "Database path must be supplied with -d or {} environment variable",
+            DATABASE_ENV_VAR
+        );
+        process::exit(1);
+    };
+
+    let db = db::establish_connection(&db_path)?;
+
+    let services = matches
+        .opt_strs("s")
+        .into_iter()
+        .map(|s| s.parse())
+        .collect::<Result<Vec<Service>, _>>()?;
+
+    if matches.opt_present("r") {
+        register(&db, access_mode, &services)
+    } else {
+        let services = if services.is_empty() {
+            Services::All
+        } else {
+            Services::Specific(services)
+        };
+        let urls = matches
+            .free
+            .iter()
+            .map(|url| Url::parse(url))
+            .collect::<Result<Vec<_>, _>>()?;
+        run(&db, access_mode, &services, &urls)
     }
 }
 
@@ -104,10 +129,10 @@ fn print_usage(program: &str, opts: &Options) {
 }
 
 fn run(
+    db: &Database,
     access_mode: AccessMode,
-    doloop: bool,
-    toot: bool,
-    tweet: bool,
+    services: &Services,
+    feed_urls: &[Url],
 ) -> Result<(), Box<dyn Error>> {
     // let database_url = env_var("DATABASE_URL")?;
     // let conn = db::establish_connection(&database_url)?;
@@ -153,14 +178,23 @@ fn run(
     //     }
     // }
     //
-    // Ok(())
-    todo!()
+
+    let services = db::load_services(db, services)?;
+    if services.is_empty() {
+        return Err("no configured services to post to".into());
+    }
+
+    // For each feed, fetch it and pass new entries to announce new posts for each enabled service
+
+    // announce_new_posts(db, network, )
+
+    Ok(())
 }
 
 fn announce_new_posts<S: SocialNetwork>(
+    db: &Database,
     network: &S,
-    // conn: &PgConnection,
-    categories: &Categories,
+    // categories: &Categories,
 ) -> Result<(), Box<dyn Error>> {
     // for post in <S as SocialNetwork>::unpublished_posts(conn)? {
     //     let post_id = post.id;
@@ -185,11 +219,24 @@ fn announce_new_posts<S: SocialNetwork>(
     todo!()
 }
 
-fn register(service: Service) -> Result<(), Box<dyn Error>> {
-    match service {
-        Service::Twitter => Twitter::register(),
-        Service::Mastodon => Mastodon::register(),
-    }
+fn register(
+    db: &Database,
+    access_mode: AccessMode,
+    services: &[Service],
+) -> Result<(), Box<dyn Error>> {
+    let service = match services {
+        [service] => service,
+        _ => {
+            return Err("Exactly one service must be supplied with -s to register".into());
+        }
+    };
+
+    // match service {
+    //     Service::Twitter => Twitter::register(),
+    //     Service::Mastodon => Mastodon::register(),
+    // }
+
+    Ok(())
 }
 
 mod null_twitter {
