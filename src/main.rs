@@ -1,22 +1,23 @@
-use env_logger;
-use feed_parrot::db;
-use feed_parrot::models::{Service, Services};
-use redb::Database;
-use url::Url;
-
 use std::env::{self, VarError};
 use std::error::Error;
 use std::process::ExitCode;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 use std::{process, thread};
 
-// use diesel::{Connection, PgConnection};
-// use dotenv::dotenv;
+use env_logger;
 use env_logger::Env;
+use feed_parrot::db;
+use feed_parrot::models::{Service, Services};
 use getopts::Options;
 use log::{debug, error, info};
+use redb::Database;
+use url::Url;
 
+use feed_parrot::crawler;
+use feed_parrot::crawler::SyncType;
 use feed_parrot::mastodon::Mastodon;
 use feed_parrot::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
@@ -24,13 +25,12 @@ use feed_parrot::twitter::Twitter;
 use feed_parrot::Delay;
 #[cfg(not(feature = "twitter"))]
 use null_twitter::Twitter;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 const LOG_ENV_VAR: &str = "FEED_PARROT_LOG";
 const DATABASE_ENV_VAR: &str = "FEED_PARROT_DATABASE";
 const ONE_SECOND: Duration = Duration::from_secs(1);
 const SLEEP_TIME: usize = 600; // 10 minutes
+const TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> ExitCode {
     match try_main() {
@@ -190,8 +190,39 @@ fn run(
     }
 
     // For each feed, fetch it and pass new entries to announce new posts for each enabled service
+    if feed_urls.is_empty() {
+        return Err("no feeds URLs supplied".into());
+    }
 
-    // announce_new_posts(db, network, )
+    // No point spinning up 12 or 24 threads for this little program, cap at four
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(
+            std::thread::available_parallelism()
+                .map(|count| count.get())
+                .unwrap_or(4)
+                .min(4),
+        )
+        .thread_name("feed-parrot")
+        .build()?;
+
+    let client = reqwest::Client::builder()
+        .connect_timeout(TIMEOUT)
+        .read_timeout(TIMEOUT)
+        .timeout(Duration::from_secs(2 * 60))
+        .user_agent(format!("Feed Parrot/{}", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
+    let sync_type = SyncType::Initial;
+
+    for feed_url in feed_urls {
+        let res = runtime.block_on(crawler::refresh_feed(
+            client.clone(),
+            &db,
+            sync_type,
+            feed_url.clone(),
+        ));
+        // announce_new_posts(db, network, )
+    }
 
     Ok(())
 }

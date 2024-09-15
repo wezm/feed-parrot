@@ -8,7 +8,7 @@ pub mod feed;
 pub mod mastodon;
 pub mod models;
 // pub mod schema;
-mod crawler;
+pub mod crawler;
 mod json_feed;
 pub mod social_network;
 #[cfg(feature = "twitter")]

@@ -34,14 +34,14 @@ use crate::json_feed::JsonFeed;
 const MAX_RESPONSE_SIZE: u64 = 5 * 1024 * 1024; // 5 MiB
 
 #[derive(Debug)]
-enum CrawlError {
+pub enum CrawlError {
     Database(redb::Error),
     Fetch(FetchError),
     Process(ProcessError),
 }
 
 #[derive(Debug)]
-enum FetchError {
+pub enum FetchError {
     Database(redb::Error),
     Request(reqwest::Error),
     /// Feed response body exceeded the limit
@@ -78,7 +78,7 @@ enum ProcessError {
 //     pub updated_at: OffsetDateTime,
 // }
 
-enum FeedData<T> {
+pub enum FeedData<T> {
     NotModified,
     Updated(T),
 }
@@ -295,7 +295,7 @@ struct CrawlOutcome {
 // }
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
-enum SyncType {
+pub enum SyncType {
     Initial,
     Incremental,
 }
@@ -318,9 +318,9 @@ enum SyncType {
 // }
 
 // #[instrument(skip(client, conn), err)]
-async fn refresh_feed(
+pub async fn refresh_feed(
     client: reqwest::Client,
-    conn: &mut Database,
+    conn: &Database,
     sync_type: SyncType,
     // feed_id: FeedId,
     feed_url: Url,
