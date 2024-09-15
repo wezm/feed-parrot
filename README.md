@@ -65,7 +65,7 @@ Usage
 ```
 USAGE:
     feed-parrot [OPTIONS] [FEED_URL]...
-    
+
 ARGS:
     <URL>...
         One or more feed URLs to check for new items.
@@ -79,7 +79,7 @@ OPTIONS:
 
     -V, --version
             Prints version information
-            
+
 ENVIRONMENT
     FEED_PARROT_LOG
         Set log level and filter.
@@ -182,6 +182,21 @@ If packaging Feed Parrot for an operating system registry it might make sense
 to use `native-tls`. On Linux and BSD systems that adds a dependency on
 OpenSSL.
 
+### Man Page
+
+A man page is available. Building it requires the [scdoc] tool:
+
+    make -C doc/Makefile
+
+The man page is written to `doc/feed-parrot.1`.
+
+#### Installation
+
+There is an `install` target for installing the man page. `PREFIX`, `MANDIR`,
+and `DESTDIR` are honoured if supplied.
+
+    make -C doc/Makefile install
+
 <!--
 
 Credits
@@ -203,3 +218,4 @@ at your option.
 
 [rustup]: https://www.rust-lang.org/tools/install
 [env_logger]: https://docs.rs/env_logger/0.11.3/env_logger/index.html
+[scdoc]: https://git.sr.ht/~sircmpwn/scdoc

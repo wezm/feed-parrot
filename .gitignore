@@ -1,4 +1,5 @@
 /public
 .idea
 /target/
+/doc/feed-parrot.1
 **/*.rs.bk
