@@ -1,6 +1,8 @@
 //! A definition of JSON Feed 1.0
 //! <https://www.jsonfeed.org/>
 
+// TODO: Update for version 1.1
+
 use serde::Deserialize;
 
 #[derive(Deserialize, Clone)]

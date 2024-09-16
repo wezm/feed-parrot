@@ -254,6 +254,7 @@ fn run(
         let mut feed = match db::load_feed(&db, &feed_url) {
             Ok(feed) => feed,
             Err(err) => {
+                // TODO: make this exit non-zero
                 error!("Unable to load feed from database {feed_url}: {err}");
                 continue;
             }
@@ -270,6 +271,7 @@ fn run(
             Ok(feed) => feed,
             Err(err) => {
                 error!("Unable to fetch {feed_url}: {err}");
+                // TODO: make this exit non-zero
                 continue;
             }
         };
@@ -279,11 +281,13 @@ fn run(
                 info!("{feed_url}: No new posts");
             }
             FeedData::Updated(parsed_feed) => {
+                // TODO: Run networks in parallel
                 for network in services.iter() {
                     if feed.had_initial_sync {
                         match announce_new_posts(db, network.as_ref(), &parsed_feed) {
                             Ok(()) => (),
                             Err(report) => {
+                                // TODO: make this exit non-zero
                                 error!("Failed to announce new posts for {feed_url}: {:?}", report);
                             }
                         }
@@ -292,6 +296,7 @@ fn run(
                         match perform_initial_sync(db, network.as_ref(), &parsed_feed) {
                             Ok(()) => feed.had_initial_sync = true,
                             Err(report) => {
+                                // TODO: make this exit non-zero
                                 error!(
                                     "Failed to complete initial sync of {feed_url}: {:?}",
                                     report
@@ -347,6 +352,8 @@ fn announce_new_posts(
             item.title.as_deref().unwrap_or("<empty>")
         );
 
+        // TODO: get the network to prepare the post before sending it so we can check the content table
+
         let tx = db.begin_write()?;
         let res: eyre::Result<_> = {
             let status = network.publish_post(&tx, &item)?;
@@ -384,6 +391,7 @@ fn announce_new_posts(
         //         error!("Unable to announce post [{}]: {}", post_id, err);
         //     }
 
+        // TODO: Wait delay period
     }
 
     Ok(())

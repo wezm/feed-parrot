@@ -104,6 +104,7 @@ fn toot_text_from_post(item: &NewFeedItem) -> Option<String> {
         .separator("\n\n")
         .to_string();
 
+    // FIXME: Do a proper length check and truncate if needed
     if toot.chars().count() > 500 {
         return None;
     }
