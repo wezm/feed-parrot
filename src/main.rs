@@ -134,7 +134,7 @@ fn try_main() -> eyre::Result<()> {
         let instance: Option<Url> = matches
             .opt_get("i")
             .wrap_err("unable to parse instance URL")?;
-        register(&db, client.clone(), access_mode, instance, &services)
+        register(&db, client.clone(), instance, &services)
     } else {
         let services = if services.is_empty() {
             Services::All
@@ -393,7 +393,6 @@ fn announce_new_posts(
 fn register(
     db: &Database,
     client: reqwest::Client,
-    access_mode: AccessMode,
     instance: Option<Url>,
     services: &[Service],
 ) -> eyre::Result<()> {
@@ -413,10 +412,6 @@ fn register(
             let Some(instance) = instance else {
                 bail!("instance must be specified with -i to register with Mastodon")
             };
-            // let masto = Mastodon {
-            //     access_mode,
-            //     instance,
-            // };
             let instance = mastodon::Instance(instance);
             instance.register(db, client)
         }
