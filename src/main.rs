@@ -3,9 +3,11 @@ use std::process;
 use std::process::ExitCode;
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use env_logger;
 use env_logger::Env;
 use eyre::{bail, Context};
+use feed_parrot::db::Tooted;
 use feed_parrot::feed::ParsedFeed;
 use feed_parrot::mastodon::models::MastodonState;
 use feed_parrot::models::{Service, Services};
@@ -13,14 +15,13 @@ use feed_parrot::{db, mastodon};
 use getopts::Options;
 use log::{debug, error, info};
 use redb::Database;
-use reqwest::Client;
 use url::Url;
 
 use feed_parrot::crawler::{self, FeedData};
 use feed_parrot::crawler::{ConditionalRequest, SyncType};
 use feed_parrot::mastodon::Mastodon;
 use feed_parrot::social_network::{AccessMode, Registration, SocialNetwork};
-#[cfg(twitter)]
+#[cfg(feature = "twitter")]
 use feed_parrot::twitter::Twitter;
 use feed_parrot::Delay;
 
@@ -161,7 +162,7 @@ fn print_usage(program: &str, opts: &Options) {
 
 fn run(
     db: &Database,
-    client: Client,
+    client: reqwest::Client,
     access_mode: AccessMode,
     cond_req: ConditionalRequest,
     services: &Services,
@@ -265,7 +266,7 @@ fn run(
             &mut feed,
         ));
 
-        let parsed_feed = match res {
+        let feed_data = match res {
             Ok(feed) => feed,
             Err(err) => {
                 error!("Unable to fetch {feed_url}: {err}");
@@ -273,16 +274,29 @@ fn run(
             }
         };
 
-        match parsed_feed {
+        match feed_data {
             FeedData::NotModified => {
                 info!("{feed_url}: No new posts");
             }
-            FeedData::Updated(feed) => {
+            FeedData::Updated(parsed_feed) => {
                 for network in services.iter() {
-                    match announce_new_posts(db, network.as_ref(), &feed) {
-                        Ok(()) => (),
-                        Err(report) => {
-                            error!("Failed to announce new posts for {feed_url}: {:?}", report);
+                    if feed.had_initial_sync {
+                        match announce_new_posts(db, network.as_ref(), &parsed_feed) {
+                            Ok(()) => (),
+                            Err(report) => {
+                                error!("Failed to announce new posts for {feed_url}: {:?}", report);
+                            }
+                        }
+                    } else {
+                        info!("Performing initial sync of {feed_url}");
+                        match perform_initial_sync(db, network.as_ref(), &parsed_feed) {
+                            Ok(()) => feed.had_initial_sync = true,
+                            Err(report) => {
+                                error!(
+                                    "Failed to complete initial sync of {feed_url}: {:?}",
+                                    report
+                                );
+                            }
                         }
                     }
                 }
@@ -300,6 +314,21 @@ fn run(
     Ok(())
 }
 
+fn perform_initial_sync(
+    db: &Database,
+    network: &dyn SocialNetwork,
+    feed: &ParsedFeed,
+) -> eyre::Result<()> {
+    if !network.is_writeable() {
+        return Ok(());
+    }
+
+    let guids = feed.items().map(|item| item.guid);
+    let now = Utc::now();
+    db::mark_items_seen(db, network.service(), now, guids)?;
+    Ok(())
+}
+
 fn announce_new_posts(
     db: &Database,
     network: &dyn SocialNetwork,
@@ -308,7 +337,8 @@ fn announce_new_posts(
     for item in feed.items() {
         // Determine if this item has been posted before
         if db::item_posted(db, network.service(), &item.guid)? {
-            debug!("skip {}, already posted", item.guid)
+            debug!("skip {}, already posted", item.guid);
+            continue;
         }
 
         info!(
@@ -318,12 +348,24 @@ fn announce_new_posts(
         );
 
         let tx = db.begin_write()?;
-        {
-            if let Err(err) = network.publish_post(&tx, &item) {
-                error!("Unable to announce post [{}]: {:?}", item.guid, err);
+        let res: eyre::Result<_> = {
+            let status = network.publish_post(&tx, &item)?;
+            let post = Tooted {
+                guid: item.guid.clone(),
+                status,
+                at: Utc::now(),
+            };
+            network.mark_post_published(&tx, network.service(), post)?;
+            Ok(())
+        };
+
+        match res {
+            Ok(()) => tx.commit()?,
+            Err(err) => {
+                drop(tx);
+                error!("Unable to publish post [{}]: {:?}", item.guid, err);
             }
-        }
-        tx.commit()?;
+        };
 
         //     let post_id = post.id;
         //     info!("New post to announce: [{}] {}", post_id, post.title);
@@ -349,7 +391,7 @@ fn announce_new_posts(
 
 fn register(
     db: &Database,
-    client: Client,
+    client: reqwest::Client,
     access_mode: AccessMode,
     instance: Option<Url>,
     services: &[Service],
@@ -386,6 +428,7 @@ mod null_twitter {
         models::Service,
         social_network::{Registration, SocialNetwork},
     };
+    use redb::WriteTransaction;
 
     pub struct Twitter;
 
@@ -400,10 +443,23 @@ mod null_twitter {
             Service::Twitter
         }
 
+        fn is_writeable(&self) -> bool {
+            false
+        }
+
         fn publish_post(
             &self,
             _tx: &redb::WriteTransaction,
             _item: &feed_parrot::feed::NewFeedItem,
+        ) -> eyre::Result<String> {
+            bail!("Twitter support is not enabled")
+        }
+
+        fn mark_post_published(
+            &self,
+            _tx: &WriteTransaction,
+            _service: Service,
+            _toot: feed_parrot::db::Tooted,
         ) -> eyre::Result<()> {
             bail!("Twitter support is not enabled")
         }

@@ -1,6 +1,7 @@
 use redb::{Database, WriteTransaction};
 use reqwest::Client;
 
+use crate::db::Tooted;
 use crate::feed::NewFeedItem;
 use crate::models::Service;
 
@@ -21,10 +22,16 @@ pub trait SocialNetwork {
     // fn register(&self, db: &Database, client: Client) -> eyre::Result<()>;
 
     // fn unpublished_posts(connection: &PgConnection) -> QueryResult<Vec<Post>>;
-
     fn service(&self) -> Service;
 
-    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<()>;
+    fn is_writeable(&self) -> bool;
 
-    // fn mark_post_published(&self, connection: &PgConnection, post: Post) -> QueryResult<()>;
+    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<String>;
+
+    fn mark_post_published(
+        &self,
+        tx: &WriteTransaction,
+        service: Service,
+        toot: Tooted,
+    ) -> eyre::Result<()>;
 }

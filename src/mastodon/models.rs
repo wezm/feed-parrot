@@ -4,12 +4,13 @@ use chrono::{DateTime, Utc};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::str::FromStr;
+use url::Url;
 
 #[derive(Serialize, Deserialize)]
 pub struct MastodonState {
     pub client_id: String,
     pub client_secret: String,
-    pub instance: String, // TODO: Url
+    pub instance: Url,
     pub(crate) access_token: String,
 }
 

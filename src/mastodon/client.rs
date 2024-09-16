@@ -118,12 +118,10 @@ pub async fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> 
     debug!("Got token");
 
     // Save the token (and client credentials)
-
-    // TODO: Build MastodonState
     let state = MastodonState {
         client_id,
         client_secret,
-        instance: instance.to_string(),
+        instance,
         access_token: token_resp.access_token,
     };
 

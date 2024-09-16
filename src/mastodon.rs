@@ -1,12 +1,13 @@
 mod client;
 pub mod models;
 
+use eyre::bail;
 use models::MastodonState;
 use redb::{Database, WriteTransaction};
 use reqwest::Client;
 use url::Url;
 
-use crate::db;
+use crate::db::{self, Tooted};
 use crate::feed::NewFeedItem;
 use crate::models::Service;
 use crate::social_network::{AccessMode, Registration, SocialNetwork};
@@ -39,15 +40,18 @@ impl SocialNetwork for Mastodon {
         Service::Mastodon
     }
 
-    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<()> {
+    fn is_writeable(&self) -> bool {
+        self.access_mode == AccessMode::ReadWrite
+    }
+
+    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<String> {
         let Some(status_text) = toot_text_from_post(item) else {
-            error!("Unable to compose toot for {:?}", item);
-            return Ok(());
+            bail!("Unable to compose toot for {:?}", item);
         };
 
         info!("Post: {}", status_text);
 
-        if self.is_read_write() {
+        if self.is_writeable() {
             // let _toot = self.client.new_status(
             //     StatusBuilder::new()
             //         .status(status_text)
@@ -56,21 +60,20 @@ impl SocialNetwork for Mastodon {
             // )?;
             todo!("post toot")
         }
-        Ok(())
+        Ok(status_text)
     }
 
-    // fn mark_post_published(&self, connection: &PgConnection, post: Post) -> QueryResult<()> {
-    //     if self.is_read_write() {
-    //         db::mark_post_tooted(connection, post)?;
-    //     }
-    //
-    //     Ok(())
-    // }
-}
+    fn mark_post_published(
+        &self,
+        tx: &WriteTransaction,
+        service: Service,
+        post: Tooted,
+    ) -> eyre::Result<()> {
+        if self.is_writeable() {
+            db::mark_post_tooted(tx, service, post)?;
+        }
 
-impl Mastodon {
-    fn is_read_write(&self) -> bool {
-        self.access_mode == AccessMode::ReadWrite
+        Ok(())
     }
 }
 

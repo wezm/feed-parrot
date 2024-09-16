@@ -44,8 +44,10 @@ const FEED_TABLE: TableDefinition<&str, &[u8]> = TableDefinition::new("feeds");
 
 #[derive(Serialize, Deserialize)]
 pub struct Feed {
-    // pub title: String,
     pub url: Url,
+    /// `true` if this feed has had its initial sync
+    #[serde(default)]
+    pub had_initial_sync: bool,
     pub etag: Option<String>,
     pub last_modified: Option<DateTime<Utc>>,
     pub last_refresh_hash: Option<[u8; HASH_LEN]>,
@@ -73,6 +75,7 @@ pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
         Err(TableError::TableDoesNotExist(_)) => {
             return Ok(Feed {
                 url: feed_url.clone(),
+                had_initial_sync: false,
                 etag: None,
                 last_modified: None,
                 last_refresh_hash: None,
@@ -85,6 +88,7 @@ pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
     let Some(data) = access.as_ref().map(|guard| guard.value()) else {
         return Ok(Feed {
             url: feed_url.clone(),
+            had_initial_sync: false,
             etag: None,
             last_modified: None,
             last_refresh_hash: None,
@@ -195,16 +199,41 @@ pub fn item_posted(db: &Database, service: Service, guid: &str) -> Result<bool, 
         .map_err(redb::Error::from)
 }
 
-pub fn mark_post_tooted(db: &Database, service: Service, toot: Tooted) -> Result<(), redb::Error> {
-    let write_txn = db.begin_write()?;
+pub fn mark_post_tooted(
+    tx: &WriteTransaction,
+    service: Service,
+    toot: Tooted,
+) -> Result<(), redb::Error> {
+    // let write_txn = db.begin_write()?;
+    // {
+    let mut tooted_table = tx.open_table(POSTED_ITEMS_TABLE)?;
+    let mut toots_table = tx.open_table(POSTS_TABLE)?;
+    let hash = blake3::hash(toot.status.as_bytes()); // FIXME: avoid calculating the hash twice
+    tooted_table.insert((service, toot.guid.as_str()), toot.at.timestamp())?;
+    toots_table.insert((service, *hash.as_bytes()), toot.at.timestamp())?;
+    // }
+    // write_txn.commit()?;
+    Ok(())
+}
+
+// Take an iterator that yields guids
+pub fn mark_items_seen<I>(
+    db: &Database,
+    service: Service,
+    at: DateTime<Utc>,
+    items: I,
+) -> Result<(), redb::Error>
+where
+    I: Iterator<Item = String>,
+{
+    let tx = db.begin_write()?;
     {
-        let mut tooted_table = write_txn.open_table(POSTED_ITEMS_TABLE)?;
-        let mut toots_table = write_txn.open_table(POSTS_TABLE)?;
-        let hash = blake3::hash(toot.status.as_bytes()); // FIXME: avoid calculating the hash twice
-        tooted_table.insert((service, toot.guid.as_str()), toot.at.timestamp())?;
-        toots_table.insert((service, *hash.as_bytes()), toot.at.timestamp())?;
+        let mut tooted_table = tx.open_table(POSTED_ITEMS_TABLE)?;
+        for guid in items {
+            tooted_table.insert((service, guid.as_str()), at.timestamp())?;
+        }
     }
-    write_txn.commit()?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -241,5 +270,33 @@ impl Value for Service {
 impl Key for Service {
     fn compare(data1: &[u8], data2: &[u8]) -> std::cmp::Ordering {
         Self::from_bytes(data1).cmp(&Self::from_bytes(data2))
+    }
+}
+
+#[cfg(debug_assertions)]
+pub mod debug {
+    #![allow(dead_code)]
+
+    //! Database debugging functions.
+
+    use super::*;
+
+    pub fn delete_feeds(db: &Database) -> eyre::Result<()> {
+        let tx = db.begin_write()?;
+        tx.delete_table(FEED_TABLE)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn dump_seen_items(db: &Database) -> eyre::Result<()> {
+        let tx = db.begin_read()?;
+        let seen_items = tx.open_table(POSTED_ITEMS_TABLE)?;
+        for item in seen_items.iter()? {
+            let (k, v) = item?;
+            let (service, guid) = k.value();
+            let seen = v.value();
+            println!("{}: {} -> {}", service, guid, seen);
+        }
+        Ok(())
     }
 }
