@@ -1,29 +1,16 @@
-// mod config;
-// #[cfg(windows)]
-// mod dirs;
-// mod models;
-// mod search;
-// mod top_tooters;
-// #[cfg(not(windows))]
-// mod xdg;
-//
-// #[cfg(not(windows))]
-// use crate::xdg as dirs;
-
 use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 
 use eyre::eyre;
 use log::{debug, error};
-use reqwest::{Client, Response, Url};
+use reqwest::blocking::{Client, Response};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use simple_eyre::eyre;
+use url::Url;
 
 use crate::mastodon::models::MastodonState;
-// pub use search::search;
-// pub use top_tooters::top_tooters;
 
 const SCOPES: &str = "write:statuses";
 const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
@@ -56,7 +43,7 @@ struct Status {
 }
 
 /// Perform the OAuth flow to obtain credentials
-pub async fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
+pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
     // Register application to obtain client id and secret
     let url = instance.join("/api/v1/apps")?;
     let resp = client
@@ -67,9 +54,8 @@ pub async fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> 
             ("scopes", SCOPES),
             ("website", "https://feedparrot.com/"),
         ])
-        .send()
-        .await?; // TODO: Add context info to error
-    let app: Application = json_or_error(resp).await?;
+        .send()?; // TODO: Add context info to error
+    let app: Application = json_or_error(resp)?;
 
     let client_id = app
         .client_id
@@ -112,9 +98,8 @@ pub async fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> 
             ("redirect_uri", REDIRECT_URI),
             ("scope", SCOPES),
         ])
-        .send()
-        .await?; // TODO: Add context info to error
-    let token_resp: TokenResponse = json_or_error(resp).await?;
+        .send()?; // TODO: Add context info to error
+    let token_resp: TokenResponse = json_or_error(resp)?;
     debug!("Got token");
 
     // Save the token (and client credentials)
@@ -186,14 +171,14 @@ pub async fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> 
 //     Ok(())
 // }
 
-async fn json_or_error<T: DeserializeOwned>(response: Response) -> eyre::Result<T> {
+fn json_or_error<T: DeserializeOwned>(response: Response) -> eyre::Result<T> {
     if response.status().is_success() {
-        let app = response.json().await?;
+        let app = response.json()?;
         Ok(app)
     } else {
         error!("Request was unsuccessful ({})", response.status().as_u16());
         // TODO: Distinguish 4xx and 5xx responses
-        let err: ErrorResponse = response.json().await?;
+        let err: ErrorResponse = response.json()?;
         Err(eyre!(err.error_description))
     }
 }

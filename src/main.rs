@@ -3,7 +3,7 @@ use std::process::ExitCode;
 use std::time::Duration;
 use std::{process, thread};
 
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use env_logger;
 use env_logger::Env;
 use eyre::{bail, Context};
@@ -15,6 +15,7 @@ use feed_parrot::{db, mastodon};
 use getopts::Options;
 use log::{debug, error, info};
 use redb::Database;
+use reqwest::blocking::Client;
 use url::Url;
 
 use feed_parrot::crawler::ConditionalRequest;
@@ -27,8 +28,6 @@ use feed_parrot::Delay;
 
 const LOG_ENV_VAR: &str = "FEED_PARROT_LOG";
 const DATABASE_ENV_VAR: &str = "FEED_PARROT_DATABASE";
-const ONE_SECOND: Duration = Duration::from_secs(1);
-const SLEEP_TIME: usize = 600; // 10 minutes
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> ExitCode {
@@ -113,9 +112,9 @@ fn try_main() -> eyre::Result<()> {
 
     let db = db::establish_connection(&db_path)?;
 
-    let client = reqwest::Client::builder()
+    let client = reqwest::blocking::Client::builder()
         .connect_timeout(TIMEOUT)
-        .read_timeout(TIMEOUT)
+        // .read_timeout(TIMEOUT)
         .timeout(Duration::from_secs(2 * 60))
         .user_agent(format!("Feed Parrot/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
@@ -162,7 +161,7 @@ fn print_usage(program: &str, opts: &Options) {
 
 fn run(
     db: &Database,
-    client: reqwest::Client,
+    client: Client,
     access_mode: AccessMode,
     cond_req: ConditionalRequest,
     services: &Services,
@@ -190,10 +189,6 @@ fn run(
         bail!("no feeds URLs supplied")
     }
 
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()?;
-
     for feed_url in feed_urls {
         // Load the feed from the db
         let mut feed = match db::load_feed(&db, &feed_url) {
@@ -205,7 +200,7 @@ fn run(
             }
         };
 
-        let res = runtime.block_on(crawler::refresh_feed(client.clone(), cond_req, &mut feed));
+        let res = crawler::refresh_feed(client.clone(), cond_req, &mut feed);
 
         let feed_data = match res {
             Ok(feed) => feed,
@@ -287,7 +282,7 @@ fn perform_initial_sync(
 
 fn announce_new_posts(
     db: &Database,
-    client: reqwest::Client,
+    client: Client,
     network: &dyn SocialNetwork,
     feed: &ParsedFeed,
 ) -> eyre::Result<()> {
@@ -351,7 +346,7 @@ fn announce_new_posts(
 
 fn register(
     db: &Database,
-    client: reqwest::Client,
+    client: Client,
     instance: Option<Url>,
     services: &[Service],
 ) -> eyre::Result<()> {
@@ -384,12 +379,12 @@ mod null_twitter {
         social_network::{Registration, SocialNetwork},
     };
     use redb::WriteTransaction;
-    use reqwest::Client;
+    use reqwest::blocking::Client;
 
     pub struct Twitter;
 
     impl Registration for Twitter {
-        fn register(&self, _db: &redb::Database, _client: reqwest::Client) -> eyre::Result<()> {
+        fn register(&self, _db: &redb::Database, _client: Client) -> eyre::Result<()> {
             bail!("Twitter support is not enabled")
         }
     }

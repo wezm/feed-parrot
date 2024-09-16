@@ -1,12 +1,13 @@
 use std::borrow::Cow;
 use std::fmt::{self, Formatter};
-use std::io::Cursor;
+use std::io::{self, Cursor, Read};
 
 use atom_syndication as atom;
 use blake3::Hash;
 use chrono::{DateTime, Utc};
 // use lockable::LockPool;
 use mime::Mime;
+use reqwest::blocking::Client;
 use reqwest::header::{
     HeaderMap, HeaderValue, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
 };
@@ -35,6 +36,7 @@ pub enum CrawlError {
 pub enum FetchError {
     Database(redb::Error),
     Request(reqwest::Error),
+    Io(io::Error),
     /// Feed response body exceeded the limit
     ResponseTooBig,
     ResponseUnsuccessful(StatusCode),
@@ -92,13 +94,13 @@ struct CrawlOutcome {
     headers: HeaderMap,
 }
 
-pub async fn refresh_feed(
-    client: reqwest::Client,
+pub fn refresh_feed(
+    client: Client,
     cond_req: ConditionalRequest,
     feed: &mut Feed,
 ) -> Result<FeedData<ParsedFeed>, CrawlError> {
     info!("begin");
-    let outcome = fetch_feed(&client, &feed, cond_req).await?;
+    let outcome = fetch_feed(&client, &feed, cond_req)?;
     let feed_data = match outcome.data {
         FeedData::NotModified => {
             info!("not modified");
@@ -137,8 +139,8 @@ pub async fn refresh_feed(
     Ok(feed_data)
 }
 
-async fn fetch_feed(
-    client: &reqwest::Client,
+fn fetch_feed(
+    client: &Client,
     feed: &Feed,
     cond_req: ConditionalRequest,
 ) -> Result<CrawlOutcome, FetchError> {
@@ -157,11 +159,7 @@ async fn fetch_feed(
             headers.insert(IF_NONE_MATCH, etag);
         }
     }
-    let mut response = client
-        .get(feed.url.as_str())
-        .headers(headers)
-        .send()
-        .await?;
+    let mut response = client.get(feed.url.as_str()).headers(headers).send()?;
     let refreshed_at = Utc::now();
 
     // Check if not modified
@@ -190,15 +188,27 @@ async fn fetch_feed(
     };
 
     // Read the response body
-    while let Some(chunk) = response.chunk().await? {
-        if body
-            .len()
-            .checked_add(chunk.len())
-            .map_or(true, |len| len > MAX_RESPONSE_SIZE as usize)
-        {
-            return Err(FetchError::ResponseTooBig);
+    let mut buf = [0; 8092];
+    loop {
+        match response.read(&mut buf) {
+            // EOF
+            Ok(0) => break,
+            // Read `n` bytes
+            Ok(n) => {
+                if body
+                    .len()
+                    .checked_add(n)
+                    .map_or(true, |len| len > MAX_RESPONSE_SIZE as usize)
+                {
+                    return Err(FetchError::ResponseTooBig);
+                }
+                body.extend_from_slice(&buf[0..n]);
+            }
+            // Try again
+            Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
+            // Error
+            Err(err) => return Err(err.into()),
         }
-        body.extend_from_slice(&chunk);
     }
 
     // Calculate a hash of the body
@@ -501,6 +511,12 @@ impl From<reqwest::Error> for FetchError {
     }
 }
 
+impl From<io::Error> for FetchError {
+    fn from(err: io::Error) -> Self {
+        FetchError::Io(err)
+    }
+}
+
 impl From<rss::Error> for ProcessError {
     fn from(err: rss::Error) -> Self {
         ProcessError::Rss(err)
@@ -575,6 +591,10 @@ impl fmt::Display for FetchError {
             }
             FetchError::Request(err) => {
                 f.write_str("request: ")?;
+                err.fmt(f)
+            }
+            FetchError::Io(err) => {
+                f.write_str("i/o: ")?;
                 err.fmt(f)
             }
             FetchError::ResponseTooBig => f.write_str("response too big"),

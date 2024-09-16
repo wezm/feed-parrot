@@ -489,7 +489,6 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "simple-eyre",
- "tokio",
  "url",
  "xhtmlchardet",
 ]
@@ -1249,6 +1248,7 @@ dependencies = [
  "async-compression",
  "base64 0.22.1",
  "bytes",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2 0.4.6",

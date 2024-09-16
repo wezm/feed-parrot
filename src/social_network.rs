@@ -1,5 +1,5 @@
 use redb::{Database, WriteTransaction};
-use reqwest::Client;
+use reqwest::blocking::Client;
 
 use crate::db::Tooted;
 use crate::feed::NewFeedItem;

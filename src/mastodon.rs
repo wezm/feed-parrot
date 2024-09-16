@@ -4,7 +4,7 @@ pub mod models;
 use eyre::bail;
 use models::MastodonState;
 use redb::{Database, WriteTransaction};
-use reqwest::Client;
+use reqwest::blocking::Client;
 use url::Url;
 
 use crate::db::{self, Tooted};
@@ -22,10 +22,7 @@ pub struct Mastodon {
 
 impl Registration for Instance {
     fn register(&self, db: &Database, client: Client) -> eyre::Result<()> {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()?;
-        let state = runtime.block_on(client::auth(client, self.0.clone()))?;
+        let state = client::auth(client, self.0.clone())?;
 
         // Persist the state
         db::save_service(db, Service::Mastodon, &state)?;
