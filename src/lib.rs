@@ -1,7 +1,6 @@
 #[macro_use]
 extern crate log;
 
-pub mod categories;
 pub mod db;
 pub mod feed;
 pub mod mastodon;
