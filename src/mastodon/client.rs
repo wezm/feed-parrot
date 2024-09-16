@@ -26,10 +26,12 @@ use simple_eyre::eyre;
 use simple_eyre::eyre::WrapErr;
 
 use crate::config::Config;
+use crate::mastodon::models::MastodonState;
 // pub use search::search;
 // pub use top_tooters::top_tooters;
 
-const SCOPES: &str = "read:statuses";
+const SCOPES: &str = "write:statuses";
+const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
 
 #[derive(Deserialize)]
 struct ErrorResponse {
@@ -59,20 +61,16 @@ struct Status {
 }
 
 /// Perform the OAuth flow to obtain credentials
-pub async fn auth(instance: Url, archive_path: &str, config_path: PathBuf) -> eyre::Result<()> {
-    let client = Client::builder()
-        .user_agent(format!("MArchive {}", env!("CARGO_PKG_VERSION")))
-        .build()?;
-
+pub async fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
     // Register application to obtain client id and secret
     let url = instance.join("/api/v1/apps")?;
     let resp = client
         .post(url)
         .form(&[
-            ("client_name", "MArchive"),
-            ("redirect_uris", "urn:ietf:wg:oauth:2.0:oob"),
+            ("client_name", "Feed Parrot"),
+            ("redirect_uris", REDIRECT_URI),
             ("scopes", SCOPES),
-            // ("website", instance.as_str()) // There is no website for this application
+            ("website", "https://feedparrot.com/"),
         ])
         .send()
         .await?; // TODO: Add context info to error
@@ -91,7 +89,7 @@ pub async fn auth(instance: Url, archive_path: &str, config_path: PathBuf) -> ey
     url.query_pairs_mut()
         .append_pair("response_type", "code")
         .append_pair("client_id", &client_id)
-        .append_pair("redirect_uri", "urn:ietf:wg:oauth:2.0:oob")
+        .append_pair("redirect_uri", REDIRECT_URI)
         .append_pair("scope", SCOPES);
     println!(
         "\nOpen this page in your browser and paste the code:\n{}",
@@ -116,7 +114,7 @@ pub async fn auth(instance: Url, archive_path: &str, config_path: PathBuf) -> ey
             ("code", code),
             ("client_id", client_id.as_str()),
             ("client_secret", &client_secret),
-            ("redirect_uri", "urn:ietf:wg:oauth:2.0:oob"),
+            ("redirect_uri", REDIRECT_URI),
             ("scope", SCOPES),
         ])
         .send()
@@ -125,17 +123,16 @@ pub async fn auth(instance: Url, archive_path: &str, config_path: PathBuf) -> ey
     debug!("Got token");
 
     // Save the token (and client credentials)
-    let config = Config::new(
+
+    // TODO: Build MastodonState
+    let state = MastodonState {
         client_id,
         client_secret,
-        instance.to_string(),
-        token_resp.access_token,
-        archive_path.to_string(),
-    );
-    Config::create(config_path, config)?; // TODO: Support custom config path
-    debug!("Saved config");
+        instance: instance.to_string(),
+        access_token: token_resp.access_token,
+    };
 
-    Ok(())
+    Ok(state)
 }
 
 // pub async fn update_archive() -> eyre::Result<()> {

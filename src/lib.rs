@@ -54,7 +54,7 @@ impl Delay {
 }
 
 impl FromStr for Delay {
-    type Err = String;
+    type Err = ErrorMessage;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let raw = s.as_bytes();
@@ -64,17 +64,17 @@ impl FromStr for Delay {
                 let num_str = unsafe { std::str::from_utf8_unchecked(&raw[0..len]) };
                 let value: u16 = num_str
                     .parse()
-                    .map_err(|_| format!("{s} is not a valid delay"))?;
+                    .map_err(|_| ErrorMessage(format!("{s} is not a valid delay")))?;
                 let seconds = if c == b'm' {
                     value
                         .checked_mul(60)
-                        .ok_or_else(|| format!("{s} is too big"))?
+                        .ok_or_else(|| ErrorMessage(format!("{s} is too big")))?
                 } else {
                     value
                 };
                 Ok(Delay(Duration::from_secs(seconds.into())))
             }
-            Some(_) | None => Err("delay must end with 's' or 'm'".into()),
+            Some(_) | None => Err(ErrorMessage("delay must end with 's' or 'm'".into())),
         }
     }
 }

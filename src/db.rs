@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use eyre::eyre;
 use redb::{Database, DatabaseError, ReadableTable, TableDefinition, TableError, WriteTransaction};
 use serde::{Deserialize, Serialize};
 use url::Url;
@@ -71,10 +72,7 @@ pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
     Ok(feed)
 }
 
-pub fn load_services(
-    db: &Database,
-    services: &Services,
-) -> Result<Vec<ServiceData>, Box<dyn std::error::Error>> {
+pub fn load_services(db: &Database, services: &Services) -> eyre::Result<Vec<ServiceData>> {
     let read_txn = db.begin_read()?;
     let table = match read_txn.open_table(SERVICE_TABLE) {
         Ok(table) => table,
@@ -93,23 +91,37 @@ pub fn load_services(
                     data: v.value().to_vec(),
                 })
             })
-            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
+            .collect::<Result<Vec<_>, eyre::Report>>()?,
         Services::Specific(specified) => specified
             .iter()
             .copied()
             .map(|service| {
                 let item = table
                     .get(service as u8)?
-                    .ok_or_else(|| format!("{} is not configured", service))?;
+                    .ok_or_else(|| eyre!("{} is not configured", service))?;
                 Ok(ServiceData {
                     service,
                     data: item.value().to_vec(),
                 })
             })
-            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?,
+            .collect::<Result<Vec<_>, eyre::Report>>()?,
     };
 
     Ok(results)
+}
+
+pub fn save_service<D>(db: &Database, service: Service, data: &D) -> Result<(), redb::Error>
+where
+    D: Serialize,
+{
+    let tx = db.begin_write()?;
+    {
+        let mut table = tx.open_table(SERVICE_TABLE)?;
+        let serialised = rmp_serde::to_vec(data).expect("FIXME: unable to serialise service");
+        table.insert(service as u8, serialised.as_slice())?;
+    }
+    tx.commit()?;
+    Ok(())
 }
 
 pub fn save_feed(tx: &mut WriteTransaction, feed: &Feed) -> Result<(), redb::Error> {

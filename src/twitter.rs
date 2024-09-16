@@ -33,7 +33,7 @@ impl SocialNetwork for Twitter {
         Ok(Twitter { token, access_mode })
     }
 
-    fn register() -> Result<(), Box<dyn Error>> {
+    fn register() -> eyre::Result<()> {
         let consumer_key = env_var("TWITTER_CONSUMER_KEY")?;
         let consumer_secret = env_var("TWITTER_CONSUMER_SECRET")?;
         let con_token = egg_mode::KeyPair::new(consumer_key, consumer_secret);
@@ -71,7 +71,7 @@ impl SocialNetwork for Twitter {
         db::untweeted_posts(connection)
     }
 
-    fn publish_post(&self, post: &Post, categories: &[Rc<Category>]) -> Result<(), Box<dyn Error>> {
+    fn publish_post(&self, post: &Post, categories: &[Rc<Category>]) -> eyre::Result<()> {
         if let Some(tweet_url) = &post.twitter_url {
             let tweet_id = tweet_id_from_url(&tweet_url)
                 .ok_or_else(|| ErrorMessage(format!("{} is not a valid tweet URL", tweet_url)))?;

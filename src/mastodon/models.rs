@@ -2,8 +2,16 @@ use std::fmt;
 
 use chrono::{DateTime, Utc};
 use serde::de::{self, Visitor};
-use serde::{Deserialize, Deserializer};
+use serde::{Deserialize, Deserializer, Serialize};
 use std::str::FromStr;
+
+#[derive(Serialize, Deserialize)]
+pub struct MastodonState {
+    pub client_id: String,
+    pub client_secret: String,
+    pub instance: String,
+    pub(crate) access_token: String,
+}
 
 #[derive(Deserialize)]
 pub(crate) struct Status {

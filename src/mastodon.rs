@@ -5,80 +5,37 @@ use std::error::Error;
 use std::io;
 use std::rc::Rc;
 
-// use diesel::{PgConnection, QueryResult};
-// use elefren::apps::App;
-// use elefren::scopes::Scopes;
-// use elefren::status_builder::Visibility;
-// use elefren::{Data, MastodonClient, Registration, StatusBuilder};
+use models::MastodonState;
+use redb::Database;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::categories::Category;
-use crate::env_var;
-use crate::models::Post;
+use crate::db;
+use crate::models::{Post, Service};
 use crate::social_network::{AccessMode, SocialNetwork};
-use crate::ErrorMessage;
 
 pub struct Mastodon {
-    // client: elefren::Mastodon,
-    access_mode: AccessMode,
+    pub access_mode: AccessMode,
+    pub instance: Url,
 }
 
 impl SocialNetwork for Mastodon {
-    fn from_env(access_mode: AccessMode) -> Result<Self, Box<dyn Error>> {
-        // let data = Data {
-        //     base: env_var("MASTODON_BASE")?.into(),
-        //     client_id: env_var("MASTODON_CLIENT_ID")?.into(),
-        //     client_secret: env_var("MASTODON_CLIENT_SECRET")?.into(),
-        //     redirect: env_var("MASTODON_REDIRECT")?.into(),
-        //     token: env_var("MASTODON_TOKEN")?.into(),
-        // };
-        //
-        // Ok(Mastodon {
-        //     client: elefren::Mastodon::from(data),
-        //     access_mode,
-        // })
-        todo!()
+    fn register(&self, db: &Database, client: Client) -> eyre::Result<()> {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()?;
+        let state = runtime.block_on(client::auth(client, self.instance.clone()))?;
+
+        // Persist the state
+        db::save_service(db, Service::Mastodon, &state)?;
+
+        // TODO: Return the state
+        Ok(())
     }
 
-    fn register() -> Result<(), Box<dyn Error>> {
-        // let base = env_var("MASTODON_BASE")?;
-        // let mut builder = App::builder();
-        // let scopes = Scopes::read_all() | Scopes::write(elefren::scopes::Write::Statuses);
-        // builder
-        //     .client_name("Read Rust")
-        //     .redirect_uris("urn:ietf:wg:oauth:2.0:oob")
-        //     .scopes(scopes)
-        //     .website("https://readrust.net/");
-        // let app = builder.build()?;
-        //
-        // let registration = Registration::new(base).register(app)?;
-        // let url = registration.authorize_url()?;
-        //
-        // println!("Click this link to authorize on Mastodon: {}", url);
-        // println!("Paste the returned authorization code: ");
-        //
-        // let mut input = String::new();
-        // let _ = io::stdin().read_line(&mut input)?;
-        //
-        // let code = input.trim();
-        // let client = registration.complete(code)?;
-        //
-        // // Print out the app data
-        // let data = &client.data;
-        // println!("MASTODON_BASE={}", data.base);
-        // println!("MASTODON_CLIENT_ID={}", data.client_id);
-        // println!("MASTODON_CLIENT_SECRET={}", data.client_secret);
-        // println!("MASTODON_REDIRECT={}", data.redirect);
-        // println!("MASTODON_TOKEN={}", data.token);
-        //
-        // Ok(())
-        todo!()
-    }
-
-    // fn unpublished_posts(connection: &PgConnection) -> QueryResult<Vec<Post>> {
-    //     db::untooted_posts(connection)
-    // }
-
-    fn publish_post(&self, post: &Post, categories: &[Rc<Category>]) -> Result<(), Box<dyn Error>> {
+    fn publish_post(&self, post: &Post, categories: &[Rc<Category>]) -> eyre::Result<()> {
         // if let Some(status_url) = &post.mastodon_url {
         //     // Need to reblog this status. Doing so requires knowing the id of the status on the
         //     // instance on which it will be reblogged from. It appears the only way to turn

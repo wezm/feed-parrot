@@ -3,6 +3,8 @@ use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
 
+use crate::ErrorMessage;
+
 // use crate::schema::posts;
 
 // #[derive(Identifiable, Queryable)]
@@ -28,6 +30,7 @@ pub struct PostCategory {
 }
 
 #[derive(Clone, Copy)]
+#[repr(u8)]
 pub enum Service {
     Mastodon = 1,
     Twitter = 2,
@@ -39,25 +42,25 @@ pub enum Services {
 }
 
 impl TryFrom<u8> for Service {
-    type Error = &'static str;
+    type Error = ErrorMessage;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
         match value {
             1 => Ok(Service::Mastodon),
             2 => Ok(Service::Twitter),
-            _ => Err("invalid service number"),
+            _ => Err(ErrorMessage("invalid service number".into())),
         }
     }
 }
 
 impl FromStr for Service {
-    type Err = String;
+    type Err = ErrorMessage;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "mastodon" => Ok(Service::Mastodon),
             "twitter" => Ok(Service::Twitter),
-            _ => Err(format!("'{s}' is not a known service")),
+            _ => Err(ErrorMessage(format!("'{s}' is not a known service"))),
         }
     }
 }

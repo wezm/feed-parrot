@@ -9,11 +9,13 @@ use std::{process, thread};
 
 use env_logger;
 use env_logger::Env;
+use eyre::{bail, Context};
 use feed_parrot::db;
 use feed_parrot::models::{Service, Services};
 use getopts::Options;
 use log::{debug, error, info};
 use redb::Database;
+use reqwest::Client;
 use url::Url;
 
 use feed_parrot::crawler;
@@ -33,16 +35,24 @@ const SLEEP_TIME: usize = 600; // 10 minutes
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 fn main() -> ExitCode {
+    match simple_eyre::install() {
+        Ok(()) => (),
+        Err(report) => {
+            eprintln!("Unable to initialise error reporter: {:?}", report);
+            return ExitCode::FAILURE;
+        }
+    };
+
     match try_main() {
         Ok(()) => ExitCode::SUCCESS,
-        Err(err) => {
-            eprintln!("Error: {err}");
+        Err(report) => {
+            eprintln!("Error: {:?}", report);
             ExitCode::FAILURE
         }
     }
 }
 
-fn try_main() -> Result<(), Box<dyn Error>> {
+fn try_main() -> eyre::Result<()> {
     if let Err(env::VarError::NotPresent) = env::var(LOG_ENV_VAR) {
         env::set_var(LOG_ENV_VAR, "info");
     }
@@ -64,6 +74,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         "DURATION",
     );
     opts.optflag("r", "register", "register with a service (requires -s)");
+    opts.optopt("i", "instance", "instance to register to", "URL");
     opts.optflag("h", "help", "print this help information");
     let matches = opts.parse(&args[1..])?;
 
@@ -80,7 +91,6 @@ fn try_main() -> Result<(), Box<dyn Error>> {
     let wait = matches
         .opt_get("w")?
         .unwrap_or_else(|| Delay::from_secs(60));
-    dbg!(wait);
 
     let db_path = match env::var(DATABASE_ENV_VAR) {
         Ok(path) => Some(path),
@@ -105,6 +115,13 @@ fn try_main() -> Result<(), Box<dyn Error>> {
 
     let db = db::establish_connection(&db_path)?;
 
+    let client = reqwest::Client::builder()
+        .connect_timeout(TIMEOUT)
+        .read_timeout(TIMEOUT)
+        .timeout(Duration::from_secs(2 * 60))
+        .user_agent(format!("Feed Parrot/{}", env!("CARGO_PKG_VERSION")))
+        .build()?;
+
     let services = matches
         .opt_strs("s")
         .into_iter()
@@ -112,7 +129,14 @@ fn try_main() -> Result<(), Box<dyn Error>> {
         .collect::<Result<Vec<Service>, _>>()?;
 
     if matches.opt_present("r") {
-        register(&db, access_mode, &services)
+        if access_mode == AccessMode::ReadOnly {
+            bail!("registration cannot be run in dry-run mode");
+        }
+
+        let instance: Option<Url> = matches
+            .opt_get("i")
+            .wrap_err("unable to parse instance URL")?;
+        register(&db, client.clone(), access_mode, instance, &services)
     } else {
         let services = if services.is_empty() {
             Services::All
@@ -124,7 +148,7 @@ fn try_main() -> Result<(), Box<dyn Error>> {
             .iter()
             .map(|url| Url::parse(url))
             .collect::<Result<Vec<_>, _>>()?;
-        run(&db, access_mode, &services, &urls)
+        run(&db, client.clone(), access_mode, &services, &urls)
     }
 }
 
@@ -135,10 +159,11 @@ fn print_usage(program: &str, opts: &Options) {
 
 fn run(
     db: &Database,
+    client: Client,
     access_mode: AccessMode,
     services: &Services,
     feed_urls: &[Url],
-) -> Result<(), Box<dyn Error>> {
+) -> eyre::Result<()> {
     // let database_url = env_var("DATABASE_URL")?;
     // let conn = db::establish_connection(&database_url)?;
     // info!("Connected to database, access_mode: {:?}", access_mode);
@@ -186,12 +211,12 @@ fn run(
 
     let services = db::load_services(db, services)?;
     if services.is_empty() {
-        return Err("no configured services to post to".into());
+        bail!("no configured services to post to")
     }
 
     // For each feed, fetch it and pass new entries to announce new posts for each enabled service
     if feed_urls.is_empty() {
-        return Err("no feeds URLs supplied".into());
+        bail!("no feeds URLs supplied")
     }
 
     // No point spinning up 12 or 24 threads for this little program, cap at four
@@ -203,13 +228,7 @@ fn run(
                 .min(4),
         )
         .thread_name("feed-parrot")
-        .build()?;
-
-    let client = reqwest::Client::builder()
-        .connect_timeout(TIMEOUT)
-        .read_timeout(TIMEOUT)
-        .timeout(Duration::from_secs(2 * 60))
-        .user_agent(format!("Feed Parrot/{}", env!("CARGO_PKG_VERSION")))
+        .enable_all()
         .build()?;
 
     let sync_type = SyncType::Initial;
@@ -231,7 +250,7 @@ fn announce_new_posts<S: SocialNetwork>(
     db: &Database,
     network: &S,
     // categories: &Categories,
-) -> Result<(), Box<dyn Error>> {
+) -> eyre::Result<()> {
     // for post in <S as SocialNetwork>::unpublished_posts(conn)? {
     //     let post_id = post.id;
     //     info!("New post to announce: [{}] {}", post_id, post.title);
@@ -257,60 +276,53 @@ fn announce_new_posts<S: SocialNetwork>(
 
 fn register(
     db: &Database,
+    client: Client,
     access_mode: AccessMode,
+    instance: Option<Url>,
     services: &[Service],
-) -> Result<(), Box<dyn Error>> {
+) -> eyre::Result<()> {
     let service = match services {
         [service] => service,
         _ => {
-            return Err("Exactly one service must be supplied with -s to register".into());
+            bail!("exactly one service must be supplied with -s to register")
         }
     };
 
-    // match service {
-    //     Service::Twitter => Twitter::register(),
-    //     Service::Mastodon => Mastodon::register(),
-    // }
-
-    Ok(())
+    match service {
+        Service::Twitter => {
+            // Twitter::register()?
+            todo!()
+        }
+        Service::Mastodon => {
+            let Some(instance) = instance else {
+                bail!("instance must be specified with -i to register with Mastodon")
+            };
+            let masto = Mastodon {
+                access_mode,
+                instance,
+            };
+            masto.register(db, client)
+        }
+    }
 }
 
 mod null_twitter {
+    use eyre::bail;
     use feed_parrot::social_network::SocialNetwork;
 
     pub struct Twitter;
 
     impl SocialNetwork for Twitter {
-        fn from_env(
-            _access_mode: feed_parrot::social_network::AccessMode,
-        ) -> Result<Self, Box<dyn std::error::Error>> {
-            Ok(Twitter)
+        fn register(&self, db: &redb::Database, client: reqwest::Client) -> eyre::Result<()> {
+            bail!("Twitter support is not enabled")
         }
-
-        fn register() -> Result<(), Box<dyn std::error::Error>> {
-            Err(String::from("Twitter support is not enabled").into())
-        }
-
-        // fn unpublished_posts(
-        //     _connection: &diesel::PgConnection,
-        // ) -> diesel::QueryResult<Vec<feed_parrot::models::Post>> {
-        //     unimplemented!("Twitter support is not enabled")
-        // }
 
         fn publish_post(
             &self,
             _post: &feed_parrot::models::Post,
             _categories: &[std::rc::Rc<feed_parrot::categories::Category>],
-        ) -> Result<(), Box<dyn std::error::Error>> {
-            Err(String::from("Twitter support is not enabled").into())
+        ) -> eyre::Result<()> {
+            bail!("Twitter support is not enabled")
         }
-
-        // fn mark_post_published(
-        //     &self,
-        //     _connection: &diesel::PgConnection,
-        //     _post: feed_parrot::models::Post,
-        // ) -> diesel::QueryResult<()> {
-        //     unimplemented!("Twitter support is not enabled")
-        // }
     }
 }
