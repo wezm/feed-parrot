@@ -92,223 +92,12 @@ struct CrawlOutcome {
     headers: HeaderMap,
 }
 
-// fn main() -> Result<(), rocket::Error> {
-//     let filter = EnvFilter::builder()
-//         // Set the base level when not matched by other directives to INFO.
-//         .with_env_var("BELLBIRD_LOG")
-//         .with_default_directive(LevelFilter::INFO.into())
-//         .from_env()
-//         .expect("unable to build log filter");
-//     tracing_subscriber::fmt()
-//         .with_env_filter(filter)
-//         .try_init()
-//         .expect("unable to initialise logging");
-//     // Find feeds that need refreshing
-//     // Kick off an update task for each one (somehow preventing the next loop from duplicating the task)
-//     // Note new entries
-//     // Something else needs to notice the new entries and send notifications
-//
-//     // Goals for this implementation:
-//     // - For a given server rely heavily on async Rust + Tokio for task scheduling
-//     // - There is just one process handling all tasks. As more capacity is needed
-//     //   just add more CPUs. In an ideal scenario it would run on a many core ARM
-//     //   server.
-//     // - There needs to be some way to run multiple instances of the crawler on
-//     //   separate machines for redundancy and if network bandwidth becomes an
-//     //   issue. Perhaps this isn't a high priority initially but should be factored
-//     //   into the design.
-//     // - This inherently means some sort of distributed locking... maybe this isn't
-//     //   worth the effort initially
-//     tokio::runtime::Builder::new_multi_thread()
-//         .thread_name("bellbird-crawler-thread")
-//         // .max_blocking_threads(sync) // default 512
-//         .enable_all()
-//         .build()
-//         .expect("unable to create tokio runtime")
-//         .block_on(async { async_main().await })
-// }
-//
-// async fn async_main() -> Result<(), rocket::Error> {
-//     std::env::set_var("ROCKET_LOG_LEVEL", "off");
-//     let ignite = rocket::build().attach(Db::init()).ignite();
-//     let rocket = ignite.await?;
-//
-//     let db = Db::fetch(&rocket).unwrap(); // Won't panic as we've called Db::init
-//     // FIXME: Do we want to hold this connection the whole time or only acquire it to fetch feeds
-//     let mut conn = db.acquire().await.expect("unable to acquire db connection");
-//
-//     // From the docs:
-//     // The Client holds a connection pool internally, so it is advised that you create one and reuse it.
-//     // You do not have to wrap the Client in an Rc or Arc to reuse it, because it already uses an Arc internally.
-//     // TODO: 'on redirect'
-//     // TODO: Set user agent
-//     let client = reqwest::Client::new();
-//
-//     // Locks to prevent concurrently syncing of feeds
-//     let lock_pool = Arc::new(LockPool::new());
-//
-//     // TODO: Make it possible to shutdown cleanly with signals too
-//     let shutdown = Arc::new(AtomicBool::new(false));
-//
-//     // Listen for subscription events that might mean there are feeds that need their initial
-//     // sync.
-//     let mut listener = PgListener::connect_with(&db.0).await.expect("FIXME");
-//     listener
-//         .listen("bellbird.subscription")
-//         .await
-//         .expect("FIXME");
-//     listener.listen("bellbird.shutdown").await.expect("FIXME");
-//     let listener_task = {
-//         // NOTE(clone): These are all Arc::clones
-//         let shutdown = Arc::clone(&shutdown);
-//         let client = client.clone();
-//         let pool = db.0.clone();
-//         let lock_pool = Arc::clone(&lock_pool);
-//         tokio::spawn(async move {
-//             listen_for_notifications(client, pool, lock_pool, listener, shutdown).await
-//         })
-//     };
-//
-//     // Start the periodic check for missed notifications resulting in feeds that need their initial
-//     // sync
-//     // TODO: Move this into a function?
-//     let missed_notification_task = {
-//         let shutdown = Arc::clone(&shutdown);
-//         let pool = db.0.clone();
-//         tokio::spawn(async {
-//             let shutdown_task = tokio::spawn(async move {
-//                 let mut shutdown_interval =
-//                     tokio::time::interval(tokio::time::Duration::from_secs(1));
-//                 shutdown_interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-//                 loop {
-//                     shutdown_interval.tick().await;
-//                     if shutdown.load(Ordering::Relaxed) {
-//                         info!("shutdown missed notification task");
-//                         break;
-//                     }
-//                 }
-//             });
-//             let initial_sync_task: JoinHandle<Result<(), CrawlError>> = tokio::spawn(async move {
-//                 let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
-//                 interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
-//                 loop {
-//                     interval.tick().await;
-//                     let mut db = pool.acquire().await?;
-//                     initial_sync_check(&mut db).await?; // FIXME: Do we actually want to bail on error here
-//                 }
-//             });
-//             // Wait for one of the tasks to complete. If shutdown is first then we want to shut
-//             // down. If initial_sync is first then it errored or panicked.
-//             tokio::select! {
-//                 _ = shutdown_task => { Ok(()) }
-//                 res = initial_sync_task => { Err(res) }
-//             }
-//         })
-//     };
-//
-//     // TODO: Move this to a function
-//     info!("entering main loop");
-//     loop {
-//         // TODO: Add signal handling to shutdown cleanly
-//         // https://tokio.rs/tokio/topics/shutdown
-//         let last_check = tokio::time::Instant::now();
-//         let feeds = Feed::for_refresh(&mut conn).await.expect("FIXME"); // FIXME: How should this error be handled
-//         let count = feeds.len();
-//
-//         if count > 0 {
-//             event!(Level::INFO, "feed count" = count, "refresh");
-//             let mut tasks = JoinSet::new();
-//             for feed_id in feeds {
-//                 // NOTE(clone): These are Arc::clones
-//                 let client = client.clone();
-//                 let pool = db.0.clone();
-//                 let lock_pool = Arc::clone(&lock_pool);
-//                 tasks.spawn(async move {
-//                     let _lock = match lock_pool.try_lock(feed_id) {
-//                         Some(lock) => lock,
-//                         None => {
-//                             info!("refresh already in progress");
-//                             return;
-//                         }
-//                     };
-//                     let mut conn = pool
-//                         .acquire()
-//                         .await
-//                         .expect("unable to acquire db connection");
-//                     match refresh_and_schedule_next(
-//                         client,
-//                         &mut conn,
-//                         SyncType::Incremental,
-//                         feed_id,
-//                     )
-//                         .await
-//                     {
-//                         Ok(()) => {}
-//                         Err(err) => error!(%feed_id, %err),
-//                     }
-//                 });
-//             }
-//
-//             // When join_next returns None all tasks in the set have completed
-//             while let Some(res) = tasks.join_next().await {
-//                 match res {
-//                     Ok(()) => {}
-//                     // FIXME: I think JoinError means a panic happened, which should probably float up to main
-//                     Err(err) => error!(?err, "FIXME: join error"),
-//                 }
-//             }
-//         }
-//
-//         if shutdown.load(Ordering::Relaxed) {
-//             info!("shutdown");
-//             break;
-//         }
-//
-//         // FIXME: Replace with interval
-//         // Throttle passes through this loop to at most approximately once every second
-//         let now = tokio::time::Instant::now();
-//         let since_last_check = now - last_check;
-//         if since_last_check < tokio::time::Duration::from_secs(1) {
-//             tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-//         }
-//     }
-//
-//     listener_task
-//         .await
-//         .expect("join error")
-//         .expect("FIXME: listen for notifications error");
-//     missed_notification_task
-//         .await
-//         .expect("join error")
-//         .expect("FIXME: missed notification task error");
-//
-//     Ok(())
-// }
-
 #[derive(Debug, Copy, Clone, Eq, PartialEq)]
 pub enum SyncType {
     Initial,
     Incremental,
 }
 
-// async fn refresh_and_schedule_next(
-//     client: reqwest::Client,
-//     db: &mut PgConnection,
-//     sync_type: SyncType,
-//     feed_id: FeedId,
-// ) -> Result<(), CrawlError> {
-//     match refresh_feed(client, db, sync_type, feed_id).await {
-//         Ok(refreshed_at) => Feed::schedule_next_refresh(db, feed_id, refreshed_at).await?,
-//         Err(err) => {
-//             error!(%feed_id, %err);
-//             // FIXME: Reschedule fetch with error backoff
-//             Feed::schedule_next_refresh(db, feed_id, OffsetDateTime::now_utc()).await?
-//         }
-//     }
-//     Ok(())
-// }
-
-// #[instrument(skip(client, conn), err)]
 pub async fn refresh_feed(
     client: reqwest::Client,
     sync_type: SyncType,
@@ -355,7 +144,6 @@ pub async fn refresh_feed(
     Ok(feed_data)
 }
 
-// #[instrument(skip_all, err)]
 async fn fetch_feed(
     client: &reqwest::Client,
     feed: &Feed,
@@ -444,7 +232,6 @@ async fn fetch_feed(
     })
 }
 
-// #[instrument(skip_all, err)]
 fn update_feed_cache_keys(feed: &mut Feed, headers: &HeaderMap, hash: Option<Hash>) {
     let etag = headers.get(ETAG).and_then(|val| val.to_str().ok());
     let last_modified = headers
@@ -458,7 +245,6 @@ fn update_feed_cache_keys(feed: &mut Feed, headers: &HeaderMap, hash: Option<Has
     feed.last_refresh_hash = hash.map(|h| *h.as_bytes());
 }
 
-// #[instrument(skip_all, err)]
 fn parse_feed(
     // db: &mut Database,
     // _tx: &mut WriteTransaction,
@@ -530,7 +316,6 @@ fn parse_feed(
     Ok(parsed)
 }
 
-// #[instrument(skip_all, err)]
 // async fn listen_for_notifications(
 //     client: reqwest::Client,
 //     pool: PgPool,
@@ -593,7 +378,6 @@ fn parse_feed(
 //     Ok(())
 // }
 
-// #[instrument(skip(client, pool, lock_pool, _sender))]
 // async fn handle_subscription_notification(
 //     client: reqwest::Client,
 //     pool: PgPool,
@@ -625,7 +409,6 @@ fn parse_feed(
 //     Ok(())
 // }
 
-// #[instrument(skip_all, err)]
 // async fn initial_sync_check(db: &mut Database) -> Result<(), CrawlError> {
 //     info!("checking for missed initial syncs");
 //     let feeds = Feed::for_initial_sync(db).await?;
