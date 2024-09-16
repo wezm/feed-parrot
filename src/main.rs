@@ -1,7 +1,7 @@
 use std::env::{self, VarError};
-use std::process;
 use std::process::ExitCode;
 use std::time::Duration;
+use std::{process, thread};
 
 use chrono::{DateTime, Utc};
 use env_logger;
@@ -190,15 +190,7 @@ fn run(
         bail!("no feeds URLs supplied")
     }
 
-    // No point spinning up 12 or 24 threads for this little program, cap at four
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(
-            std::thread::available_parallelism()
-                .map(|count| count.get())
-                .unwrap_or(4)
-                .min(4),
-        )
-        .thread_name("feed-parrot")
+    let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
 
@@ -229,30 +221,41 @@ fn run(
                 info!("{feed_url}: No new posts");
             }
             FeedData::Updated(parsed_feed) => {
-                // TODO: Run networks in parallel
-                for network in services.iter() {
-                    if feed.had_initial_sync {
-                        match announce_new_posts(db, network.as_ref(), &parsed_feed) {
+                thread::scope(|scope| {
+                    let mut threads = Vec::with_capacity(services.len());
+                    for network in services.iter() {
+                        if feed.had_initial_sync {
+                            let client = client.clone();
+                            let handle = scope.spawn(|| {
+                                announce_new_posts(db, client, network.as_ref(), &parsed_feed)
+                            });
+                            threads.push((feed_url, handle));
+                        } else {
+                            info!("Performing initial sync of {feed_url}");
+                            match perform_initial_sync(db, network.as_ref(), &parsed_feed) {
+                                Ok(()) => feed.had_initial_sync = true,
+                                Err(report) => {
+                                    // TODO: make this exit non-zero
+                                    error!(
+                                        "Failed to complete initial sync of {feed_url}: {:?}",
+                                        report
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    for (feed_url, thread) in threads {
+                        // NOTE(unwrap): join returns Err when the thread panicked to we propagate that
+                        // panic.
+                        match thread.join().unwrap() {
                             Ok(()) => (),
                             Err(report) => {
                                 // TODO: make this exit non-zero
                                 error!("Failed to announce new posts for {feed_url}: {:?}", report);
                             }
                         }
-                    } else {
-                        info!("Performing initial sync of {feed_url}");
-                        match perform_initial_sync(db, network.as_ref(), &parsed_feed) {
-                            Ok(()) => feed.had_initial_sync = true,
-                            Err(report) => {
-                                // TODO: make this exit non-zero
-                                error!(
-                                    "Failed to complete initial sync of {feed_url}: {:?}",
-                                    report
-                                );
-                            }
-                        }
                     }
-                }
+                })
             }
         }
 
@@ -284,6 +287,7 @@ fn perform_initial_sync(
 
 fn announce_new_posts(
     db: &Database,
+    client: reqwest::Client,
     network: &dyn SocialNetwork,
     feed: &ParsedFeed,
 ) -> eyre::Result<()> {
@@ -304,7 +308,7 @@ fn announce_new_posts(
 
         let tx = db.begin_write()?;
         let res: eyre::Result<_> = {
-            let status = network.publish_post(&item)?;
+            let status = network.publish_post(&client, &item)?;
             let post = Tooted {
                 guid: item.guid.clone(),
                 status,
@@ -380,6 +384,7 @@ mod null_twitter {
         social_network::{Registration, SocialNetwork},
     };
     use redb::WriteTransaction;
+    use reqwest::Client;
 
     pub struct Twitter;
 
@@ -398,7 +403,11 @@ mod null_twitter {
             false
         }
 
-        fn publish_post(&self, _item: &feed_parrot::feed::NewFeedItem) -> eyre::Result<String> {
+        fn publish_post(
+            &self,
+            _client: &Client,
+            _item: &feed_parrot::feed::NewFeedItem,
+        ) -> eyre::Result<String> {
             bail!("Twitter support is not enabled")
         }
 

@@ -15,7 +15,7 @@ pub trait Registration {
     fn register(&self, db: &Database, client: Client) -> eyre::Result<()>;
 }
 
-pub trait SocialNetwork {
+pub trait SocialNetwork: Send + Sync {
     // fn from_env(access_mode: AccessMode) -> Result<Self, Box<dyn Error>>;
 
     // fn register() -> eyre::Result<()>;
@@ -26,7 +26,7 @@ pub trait SocialNetwork {
 
     fn is_writeable(&self) -> bool;
 
-    fn publish_post(&self, item: &NewFeedItem) -> eyre::Result<String>;
+    fn publish_post(&self, client: &Client, item: &NewFeedItem) -> eyre::Result<String>;
 
     fn mark_post_published(
         &self,
