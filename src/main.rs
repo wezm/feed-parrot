@@ -168,51 +168,6 @@ fn run(
     services: &Services,
     feed_urls: &[Url],
 ) -> eyre::Result<()> {
-    // let database_url = env_var("DATABASE_URL")?;
-    // let conn = db::establish_connection(&database_url)?;
-    // info!("Connected to database, access_mode: {:?}", access_mode);
-    //
-    // let categories = Categories::load();
-    //
-    // // create twiter and masto clients, with appropriate access mode
-    // let twitter = Twitter::from_env(access_mode)?;
-    // let mastodon = Mastodon::from_env(access_mode)?;
-    //
-    // debug!("Entering main loop");
-    // let term = Arc::new(AtomicBool::new(false));
-    // signal_hook::flag::register(signal_hook::consts::SIGINT, Arc::clone(&term))?;
-    // signal_hook::flag::register(signal_hook::consts::SIGTERM, Arc::clone(&term))?;
-    //
-    // while !term.load(Ordering::Relaxed) {
-    //     if toot {
-    //         debug!("Checking for new posts to toot");
-    //         if let Err(err) = announce_new_posts(&mastodon, &conn, &categories) {
-    //             // TODO: Log Sentry error
-    //             error!("Error tooting new posts: {}", err);
-    //         }
-    //     }
-    //     if term.load(Ordering::Relaxed) {
-    //         break;
-    //     }
-    //     if tweet {
-    //         debug!("Checking for new posts to tweet");
-    //         if let Err(err) = announce_new_posts(&twitter, &conn, &categories) {
-    //             error!("Error tweeting new posts: {}", err);
-    //         }
-    //     }
-    //
-    //     if !doloop {
-    //         break;
-    //     }
-    //     for _ in 0..SLEEP_TIME {
-    //         if term.load(Ordering::Relaxed) {
-    //             break;
-    //         }
-    //         thread::sleep(ONE_SECOND);
-    //     }
-    // }
-    //
-
     let services = db::load_services(db, services)?
         .into_iter()
         .map(|service_data| {
