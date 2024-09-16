@@ -1,15 +1,13 @@
 use std::borrow::Cow;
 use std::fmt::{self, Formatter};
 use std::io::Cursor;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 
 use atom_syndication as atom;
 use blake3::Hash;
 use chrono::{DateTime, Utc};
 // use lockable::LockPool;
 use mime::Mime;
-use redb::{Database, DatabaseError, WriteTransaction};
+use redb::{Database, WriteTransaction};
 use reqwest::header::{
     HeaderMap, HeaderValue, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
 };
@@ -21,7 +19,6 @@ use reqwest::StatusCode;
 use rss::Channel;
 // use sqlx::postgres::PgListener;
 // use sqlx::{Connection, PgConnection, PgPool};
-use tokio::sync::mpsc::Sender;
 use url::Url;
 // use tracing::{debug, error, event, info, instrument, Level};
 // use tracing_subscriber::filter::{EnvFilter, LevelFilter};

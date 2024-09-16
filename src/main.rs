@@ -1,11 +1,7 @@
 use std::env::{self, VarError};
-use std::error::Error;
+use std::process;
 use std::process::ExitCode;
-use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Duration;
-use std::{process, thread};
 
 use env_logger;
 use env_logger::Env;
@@ -13,7 +9,6 @@ use eyre::{bail, Context};
 use feed_parrot::db;
 use feed_parrot::models::{Service, Services};
 use getopts::Options;
-use log::{debug, error, info};
 use redb::Database;
 use reqwest::Client;
 use url::Url;
@@ -25,8 +20,6 @@ use feed_parrot::social_network::{AccessMode, SocialNetwork};
 #[cfg(twitter)]
 use feed_parrot::twitter::Twitter;
 use feed_parrot::Delay;
-#[cfg(not(feature = "twitter"))]
-use null_twitter::Twitter;
 
 const LOG_ENV_VAR: &str = "FEED_PARROT_LOG";
 const DATABASE_ENV_VAR: &str = "FEED_PARROT_DATABASE";

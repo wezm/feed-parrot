@@ -1,4 +1,3 @@
-use std::error::Error;
 use std::rc::Rc;
 
 // use diesel::pg::PgConnection;

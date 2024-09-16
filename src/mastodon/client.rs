@@ -11,21 +11,16 @@
 // use crate::xdg as dirs;
 
 use std::collections::HashMap;
-use std::fs::File;
+use std::io;
 use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::{env, io};
 
 use eyre::eyre;
-use log::{debug, error, info};
-use reqwest::header::AUTHORIZATION;
+use log::{debug, error};
 use reqwest::{Client, Response, Url};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use simple_eyre::eyre;
-use simple_eyre::eyre::WrapErr;
 
-use crate::config::Config;
 use crate::mastodon::models::MastodonState;
 // pub use search::search;
 // pub use top_tooters::top_tooters;

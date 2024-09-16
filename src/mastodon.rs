@@ -1,14 +1,10 @@
 mod client;
 mod models;
 
-use std::error::Error;
-use std::io;
 use std::rc::Rc;
 
-use models::MastodonState;
 use redb::Database;
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::categories::Category;
