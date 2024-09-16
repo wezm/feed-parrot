@@ -2,7 +2,6 @@
 extern crate log;
 
 pub mod categories;
-pub mod config;
 pub mod db;
 pub mod feed;
 pub mod mastodon;
