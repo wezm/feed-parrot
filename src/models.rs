@@ -29,7 +29,7 @@ pub struct PostCategory {
     pub category_id: i16,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Service {
     Mastodon = 1,

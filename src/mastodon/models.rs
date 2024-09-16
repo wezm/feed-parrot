@@ -9,7 +9,7 @@ use std::str::FromStr;
 pub struct MastodonState {
     pub client_id: String,
     pub client_secret: String,
-    pub instance: String,
+    pub instance: String, // TODO: Url
     pub(crate) access_token: String,
 }
 

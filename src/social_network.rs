@@ -1,13 +1,8 @@
-use std::rc::Rc;
-
-// use diesel::pg::PgConnection;
-// use diesel::prelude::*;
-
-use redb::Database;
+use redb::{Database, WriteTransaction};
 use reqwest::Client;
 
-use crate::categories::Category;
-use crate::models::Post;
+use crate::feed::NewFeedItem;
+use crate::models::Service;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMode {
@@ -15,15 +10,21 @@ pub enum AccessMode {
     ReadWrite,
 }
 
-pub trait SocialNetwork: Sized {
+pub trait Registration {
+    fn register(&self, db: &Database, client: Client) -> eyre::Result<()>;
+}
+
+pub trait SocialNetwork {
     // fn from_env(access_mode: AccessMode) -> Result<Self, Box<dyn Error>>;
 
     // fn register() -> eyre::Result<()>;
-    fn register(&self, db: &Database, client: Client) -> eyre::Result<()>;
+    // fn register(&self, db: &Database, client: Client) -> eyre::Result<()>;
 
     // fn unpublished_posts(connection: &PgConnection) -> QueryResult<Vec<Post>>;
 
-    fn publish_post(&self, post: &Post, categories: &[Rc<Category>]) -> eyre::Result<()>;
+    fn service(&self) -> Service;
+
+    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<()>;
 
     // fn mark_post_published(&self, connection: &PgConnection, post: Post) -> QueryResult<()>;
 }

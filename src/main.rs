@@ -6,17 +6,20 @@ use std::time::Duration;
 use env_logger;
 use env_logger::Env;
 use eyre::{bail, Context};
-use feed_parrot::db;
+use feed_parrot::feed::ParsedFeed;
+use feed_parrot::mastodon::models::MastodonState;
 use feed_parrot::models::{Service, Services};
+use feed_parrot::{db, mastodon};
 use getopts::Options;
+use log::{debug, error, info};
 use redb::Database;
 use reqwest::Client;
 use url::Url;
 
-use feed_parrot::crawler;
-use feed_parrot::crawler::SyncType;
+use feed_parrot::crawler::{self, FeedData};
+use feed_parrot::crawler::{ConditionalRequest, SyncType};
 use feed_parrot::mastodon::Mastodon;
-use feed_parrot::social_network::{AccessMode, SocialNetwork};
+use feed_parrot::social_network::{AccessMode, Registration, SocialNetwork};
 #[cfg(twitter)]
 use feed_parrot::twitter::Twitter;
 use feed_parrot::Delay;
@@ -69,6 +72,7 @@ fn try_main() -> eyre::Result<()> {
     opts.optflag("r", "register", "register with a service (requires -s)");
     opts.optopt("i", "instance", "instance to register to", "URL");
     opts.optflag("h", "help", "print this help information");
+    opts.optflag("", "no-cache", "ignore stored cache headers");
     let matches = opts.parse(&args[1..])?;
 
     if matches.opt_present("h") {
@@ -141,7 +145,12 @@ fn try_main() -> eyre::Result<()> {
             .iter()
             .map(|url| Url::parse(url))
             .collect::<Result<Vec<_>, _>>()?;
-        run(&db, client.clone(), access_mode, &services, &urls)
+        let cond_req = if matches.opt_present("no-cache") {
+            ConditionalRequest::Disabled
+        } else {
+            ConditionalRequest::Enabled
+        };
+        run(&db, client.clone(), access_mode, cond_req, &services, &urls)
     }
 }
 
@@ -154,6 +163,7 @@ fn run(
     db: &Database,
     client: Client,
     access_mode: AccessMode,
+    cond_req: ConditionalRequest,
     services: &Services,
     feed_urls: &[Url],
 ) -> eyre::Result<()> {
@@ -202,7 +212,19 @@ fn run(
     // }
     //
 
-    let services = db::load_services(db, services)?;
+    let services = db::load_services(db, services)?
+        .into_iter()
+        .map(|service_data| {
+            // Turn the service data into SocialMedia trait objects
+            match service_data.service {
+                Service::Mastodon => {
+                    let state: MastodonState = rmp_serde::from_slice(&service_data.data)?;
+                    Ok(Box::from(Mastodon { access_mode, state }) as Box<dyn SocialNetwork>)
+                }
+                Service::Twitter => todo!(),
+            }
+        })
+        .collect::<eyre::Result<Vec<_>>>()?;
     if services.is_empty() {
         bail!("no configured services to post to")
     }
@@ -227,44 +249,102 @@ fn run(
     let sync_type = SyncType::Initial;
 
     for feed_url in feed_urls {
+        // Load the feed from the db
+        let mut feed = match db::load_feed(&db, &feed_url) {
+            Ok(feed) => feed,
+            Err(err) => {
+                error!("Unable to load feed from database {feed_url}: {err}");
+                continue;
+            }
+        };
+
         let res = runtime.block_on(crawler::refresh_feed(
             client.clone(),
-            &db,
             sync_type,
-            feed_url.clone(),
+            cond_req,
+            &mut feed,
         ));
-        // announce_new_posts(db, network, )
+
+        let parsed_feed = match res {
+            Ok(feed) => feed,
+            Err(err) => {
+                error!("Unable to fetch {feed_url}: {err}");
+                continue;
+            }
+        };
+
+        match parsed_feed {
+            FeedData::NotModified => {
+                info!("{feed_url}: No new posts");
+            }
+            FeedData::Updated(feed) => {
+                for network in services.iter() {
+                    match announce_new_posts(db, network.as_ref(), &feed) {
+                        Ok(()) => (),
+                        Err(report) => {
+                            error!("Failed to announce new posts for {feed_url}: {:?}", report);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Persist the feed (with updated cache headers) now that processing was successful
+        if access_mode == AccessMode::ReadWrite {
+            let tx = db.begin_write()?;
+            db::save_feed(&tx, &feed)?;
+            tx.commit()?;
+        }
     }
 
     Ok(())
 }
 
-fn announce_new_posts<S: SocialNetwork>(
+fn announce_new_posts(
     db: &Database,
-    network: &S,
-    // categories: &Categories,
+    network: &dyn SocialNetwork,
+    feed: &ParsedFeed,
 ) -> eyre::Result<()> {
-    // for post in <S as SocialNetwork>::unpublished_posts(conn)? {
-    //     let post_id = post.id;
-    //     info!("New post to announce: [{}] {}", post_id, post.title);
-    //     let toot_result = db::post_categories(conn, &post, categories)
-    //         .map_err(|err| err.into())
-    //         .and_then(|post_categories| {
-    //             conn.transaction::<_, Box<dyn Error>, _>(|| {
-    //                 network.publish_post(&post, &post_categories)?;
-    //                 network.mark_post_published(conn, post)?;
-    //
-    //                 Ok(())
-    //             })
-    //         });
-    //
-    //     if let Err(err) = toot_result {
-    //         error!("Unable to announce post [{}]: {}", post_id, err);
-    //     }
-    // }
-    //
-    // Ok(())
-    todo!()
+    for item in feed.items() {
+        // Determine if this item has been posted before
+        if db::item_posted(db, network.service(), &item.guid)? {
+            debug!("skip {}, already posted", item.guid)
+        }
+
+        info!(
+            "New post to announce: [{}] {}",
+            item.guid,
+            item.title.as_deref().unwrap_or("<empty>")
+        );
+
+        let tx = db.begin_write()?;
+        {
+            if let Err(err) = network.publish_post(&tx, &item) {
+                error!("Unable to announce post [{}]: {:?}", item.guid, err);
+            }
+        }
+        tx.commit()?;
+
+        //     let post_id = post.id;
+        //     info!("New post to announce: [{}] {}", post_id, post.title);
+        //     let toot_result = db::post_categories(conn, &post, categories)
+        //         .map_err(|err| err.into())
+        //         .and_then(|post_categories| {
+        //             conn.transaction::<_, Box<dyn Error>, _>(|| {
+        //                 network.publish_post(&post, &post_categories)?;
+        //                 network.mark_post_published(conn, post)?;
+        //
+        //                 Ok(())
+        //             })
+        //         });
+        //
+        //     if let Err(err) = toot_result {
+        //         error!("Unable to announce post [{}]: {}", post_id, err);
+        //     }
+
+    }
+
+    Ok(())
 }
 
 fn register(
@@ -290,30 +370,40 @@ fn register(
             let Some(instance) = instance else {
                 bail!("instance must be specified with -i to register with Mastodon")
             };
-            let masto = Mastodon {
-                access_mode,
-                instance,
-            };
-            masto.register(db, client)
+            // let masto = Mastodon {
+            //     access_mode,
+            //     instance,
+            // };
+            let instance = mastodon::Instance(instance);
+            instance.register(db, client)
         }
     }
 }
 
 mod null_twitter {
     use eyre::bail;
-    use feed_parrot::social_network::SocialNetwork;
+    use feed_parrot::{
+        models::Service,
+        social_network::{Registration, SocialNetwork},
+    };
 
     pub struct Twitter;
 
-    impl SocialNetwork for Twitter {
-        fn register(&self, db: &redb::Database, client: reqwest::Client) -> eyre::Result<()> {
+    impl Registration for Twitter {
+        fn register(&self, _db: &redb::Database, _client: reqwest::Client) -> eyre::Result<()> {
             bail!("Twitter support is not enabled")
+        }
+    }
+
+    impl SocialNetwork for Twitter {
+        fn service(&self) -> Service {
+            Service::Twitter
         }
 
         fn publish_post(
             &self,
-            _post: &feed_parrot::models::Post,
-            _categories: &[std::rc::Rc<feed_parrot::categories::Category>],
+            _tx: &redb::WriteTransaction,
+            _item: &feed_parrot::feed::NewFeedItem,
         ) -> eyre::Result<()> {
             bail!("Twitter support is not enabled")
         }

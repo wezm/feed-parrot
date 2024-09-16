@@ -7,28 +7,22 @@ use blake3::Hash;
 use chrono::{DateTime, Utc};
 // use lockable::LockPool;
 use mime::Mime;
-use redb::{Database, WriteTransaction};
 use reqwest::header::{
     HeaderMap, HeaderValue, CONTENT_TYPE, ETAG, IF_MODIFIED_SINCE, IF_NONE_MATCH, LAST_MODIFIED,
 };
 use reqwest::StatusCode;
-// use rocket::tokio;
-// use rocket::tokio::task::{JoinHandle, JoinSet};
-// use rocket::tokio::time::MissedTickBehavior;
-// use rocket_db_pools::Database;
 use rss::Channel;
-// use sqlx::postgres::PgListener;
-// use sqlx::{Connection, PgConnection, PgPool};
-use url::Url;
-// use tracing::{debug, error, event, info, instrument, Level};
-// use tracing_subscriber::filter::{EnvFilter, LevelFilter};
 
-use crate::db::{self, Feed};
-// use crate::db::Db;
-use crate::json_feed::JsonFeed;
-// use crate::models::feed::{Feed, FeedId, FeedItem, NewFeedItem};
+use crate::db::Feed;
+use crate::feed::ParsedFeed;
 
 const MAX_RESPONSE_SIZE: u64 = 5 * 1024 * 1024; // 5 MiB
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+pub enum ConditionalRequest {
+    Enabled,
+    Disabled,
+}
 
 #[derive(Debug)]
 pub enum CrawlError {
@@ -317,17 +311,12 @@ pub enum SyncType {
 // #[instrument(skip(client, conn), err)]
 pub async fn refresh_feed(
     client: reqwest::Client,
-    conn: &Database,
     sync_type: SyncType,
-    // feed_id: FeedId,
-    feed_url: Url,
+    cond_req: ConditionalRequest,
+    feed: &mut Feed,
 ) -> Result<FeedData<ParsedFeed>, CrawlError> {
     info!("begin");
-    // Load the feed from the db
-    let mut feed = db::load_feed(conn, &feed_url)
-        .map_err(|err| CrawlError::Fetch(FetchError::Database(err)))?;
-
-    let outcome = fetch_feed(&client, &feed).await?;
+    let outcome = fetch_feed(&client, &feed, cond_req).await?;
     let feed_data = match outcome.data {
         FeedData::NotModified => {
             info!("not modified");
@@ -344,7 +333,7 @@ pub async fn refresh_feed(
             let data = to_utf8(data, &content_type)?;
 
             // conn.transaction::<'_, _, _, ProcessError>(|conn| {
-            let mut tx = conn.begin_write()?;
+            // let mut tx = conn.begin_write()?;
             let parsed_feed = {
                 // Box::pin(async move {
                 // Update the etag, last_modified, and content type on the feed. This is done inside the
@@ -352,13 +341,13 @@ pub async fn refresh_feed(
                 // with the old cache headers again next time. If new headers were used we
                 // would potentially get a 304 response and not process any of the items that
                 // failed to import initially.
-                update_feed_cache_keys(&mut tx, &mut feed, &outcome.headers, Some(hash)).await?;
-                parse_feed(&mut tx, &data, &content_type).await?
+                update_feed_cache_keys(feed, &outcome.headers, Some(hash));
+                parse_feed(&data, &content_type)?
                 // })
                 // })
                 // .await?
             };
-            tx.commit()?;
+            // tx.commit()?;
             FeedData::Updated(parsed_feed)
         }
     };
@@ -367,19 +356,25 @@ pub async fn refresh_feed(
 }
 
 // #[instrument(skip_all, err)]
-async fn fetch_feed(client: &reqwest::Client, feed: &Feed) -> Result<CrawlOutcome, FetchError> {
+async fn fetch_feed(
+    client: &reqwest::Client,
+    feed: &Feed,
+    cond_req: ConditionalRequest,
+) -> Result<CrawlOutcome, FetchError> {
     // info!(url = feed.url);
     // Build a request to fetch the feed, setting condititional request headers as appropriate
     let mut headers = HeaderMap::new();
-    let last_modified = feed
-        .last_modified
-        .map(|d| d.to_rfc2822())
-        .and_then(|val| val.parse::<HeaderValue>().ok());
-    if let Some(last_modified) = last_modified {
-        headers.insert(IF_MODIFIED_SINCE, last_modified);
-    }
-    if let Some(etag) = feed.etag.as_ref().and_then(|val| val.parse().ok()) {
-        headers.insert(IF_NONE_MATCH, etag);
+    if cond_req == ConditionalRequest::Enabled {
+        let last_modified = feed
+            .last_modified
+            .map(|d| d.to_rfc2822())
+            .and_then(|val| val.parse::<HeaderValue>().ok());
+        if let Some(last_modified) = last_modified {
+            headers.insert(IF_MODIFIED_SINCE, last_modified);
+        }
+        if let Some(etag) = feed.etag.as_ref().and_then(|val| val.parse().ok()) {
+            headers.insert(IF_NONE_MATCH, etag);
+        }
     }
     let mut response = client
         .get(feed.url.as_str())
@@ -425,18 +420,21 @@ async fn fetch_feed(client: &reqwest::Client, feed: &Feed) -> Result<CrawlOutcom
         body.extend_from_slice(&chunk);
     }
 
-    // Calculate a hash of the body and compare it to the existing one if present
+    // Calculate a hash of the body
     let hashed_data = HashedData::new(body);
-    // let hash = blake3::hash(&body);
-    let prev_hash = feed.last_refresh_hash.map(Hash::from_bytes);
-    if matches!(prev_hash, Some(prev_hash) if hashed_data.hash == prev_hash) {
-        // info!(%hash, "hash matches");
-        // Not modified
-        return Ok(CrawlOutcome {
-            data: FeedData::NotModified,
-            headers: response.headers().to_owned(),
-            refreshed_at,
-        });
+
+    // Compare it to the existing one if present
+    if cond_req == ConditionalRequest::Enabled {
+        let prev_hash = feed.last_refresh_hash.map(Hash::from_bytes);
+        if matches!(prev_hash, Some(prev_hash) if hashed_data.hash == prev_hash) {
+            // info!(%hash, "hash matches");
+            // Not modified
+            return Ok(CrawlOutcome {
+                data: FeedData::NotModified,
+                headers: response.headers().to_owned(),
+                refreshed_at,
+            });
+        }
     }
 
     Ok(CrawlOutcome {
@@ -447,12 +445,7 @@ async fn fetch_feed(client: &reqwest::Client, feed: &Feed) -> Result<CrawlOutcom
 }
 
 // #[instrument(skip_all, err)]
-async fn update_feed_cache_keys(
-    tx: &mut WriteTransaction,
-    feed: &mut Feed,
-    headers: &HeaderMap,
-    hash: Option<Hash>,
-) -> Result<(), redb::Error> {
+fn update_feed_cache_keys(feed: &mut Feed, headers: &HeaderMap, hash: Option<Hash>) {
     let etag = headers.get(ETAG).and_then(|val| val.to_str().ok());
     let last_modified = headers
         .get(LAST_MODIFIED)
@@ -463,20 +456,12 @@ async fn update_feed_cache_keys(
     feed.etag = etag.map(ToString::to_string);
     feed.last_modified = last_modified;
     feed.last_refresh_hash = hash.map(|h| *h.as_bytes());
-
-    db::save_feed(tx, &feed)
-}
-
-pub enum ParsedFeed {
-    Rss(Channel),
-    Atom(atom::Feed),
-    Json(JsonFeed),
 }
 
 // #[instrument(skip_all, err)]
-async fn parse_feed(
+fn parse_feed(
     // db: &mut Database,
-    _tx: &mut WriteTransaction,
+    // _tx: &mut WriteTransaction,
     // feed_id: FeedId,
     // sync_type: SyncType,
     data: &str,
@@ -657,80 +642,6 @@ async fn parse_feed(
 //     Ok(())
 // }
 
-struct ParsedFeedItemsIter<'feed> {
-    feed: &'feed ParsedFeed,
-    index: usize,
-}
-
-impl ParsedFeed {
-    fn items(&self) -> ParsedFeedItemsIter<'_> {
-        ParsedFeedItemsIter {
-            feed: self,
-            index: 0,
-        }
-    }
-
-    fn item_count(&self) -> usize {
-        match self {
-            ParsedFeed::Rss(feed) => feed.items.len(),
-            ParsedFeed::Atom(feed) => feed.entries.len(),
-            ParsedFeed::Json(feed) => feed.items.len(),
-        }
-    }
-
-    fn title(&self) -> &str {
-        (match self {
-            ParsedFeed::Rss(feed) => feed.title.as_str(),
-            // FIXME: text in Atom can be HTML; handle this
-            ParsedFeed::Atom(feed) => &feed.title,
-            ParsedFeed::Json(feed) => &feed.title,
-        })
-        .trim()
-    }
-
-    fn description(&self) -> Option<&str> {
-        match self {
-            ParsedFeed::Rss(feed) => Some(feed.description.as_str()),
-            // FIXME: text in Atom can be HTML; handle this
-            ParsedFeed::Atom(feed) => feed.subtitle.as_deref(),
-            ParsedFeed::Json(feed) => feed.description.as_deref(),
-        }
-    }
-}
-
-// impl Iterator for ParsedFeedItemsIter<'_> {
-//     type Item = NewFeedItem;
-
-//     fn next(&mut self) -> Option<Self::Item> {
-//         if self.index < self.feed.item_count() {
-//             let item = match self.feed {
-//                 ParsedFeed::Rss(feed) => {
-//                     // This hackery is to skip RSS items that lack a guid. Items without a guid
-//                     // don't allow us to know if the item is new or not... which is kinda important
-//                     // when sending notifications
-//                     let mut item = None;
-//                     while item.is_none() && self.index < self.feed.item_count() {
-//                         item = feed.items[self.index].clone().try_into().ok();
-//                         self.index += 1;
-//                     }
-//                     return item;
-//                 }
-//                 ParsedFeed::Atom(feed) => Some(feed.entries[self.index].clone().into()),
-//                 ParsedFeed::Json(feed) => Some(feed.items[self.index].clone().into()),
-//             };
-//             self.index += 1;
-//             item
-//         } else {
-//             None
-//         }
-//     }
-
-//     fn size_hint(&self) -> (usize, Option<usize>) {
-//         let remaining = self.feed.item_count() - self.index;
-//         (remaining, Some(remaining))
-//     }
-// }
-
 fn to_utf8(text: Vec<u8>, content_type: &Option<Mime>) -> Result<String, FetchError> {
     // Does the content type tell us anything about the encoding?
     // let &Mime(_, _, ref content_type_params) = content_type;
@@ -882,8 +793,14 @@ impl fmt::Display for FetchError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.write_str("fetch error: ")?;
         match self {
-            FetchError::Database(err) => err.fmt(f),
-            FetchError::Request(err) => err.fmt(f),
+            FetchError::Database(err) => {
+                f.write_str("database: ")?;
+                err.fmt(f)
+            }
+            FetchError::Request(err) => {
+                f.write_str("request: ")?;
+                err.fmt(f)
+            }
             FetchError::ResponseTooBig => f.write_str("response too big"),
             FetchError::ResponseUnsuccessful(err) => err.fmt(f),
             FetchError::UnknownEncoding => f.write_str("unknown encoding"),
