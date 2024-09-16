@@ -44,7 +44,7 @@ impl SocialNetwork for Mastodon {
         self.access_mode == AccessMode::ReadWrite
     }
 
-    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<String> {
+    fn publish_post(&self, item: &NewFeedItem) -> eyre::Result<String> {
         let Some(status_text) = toot_text_from_post(item) else {
             bail!("Unable to compose toot for {:?}", item);
         };

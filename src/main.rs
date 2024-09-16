@@ -304,7 +304,7 @@ fn announce_new_posts(
 
         let tx = db.begin_write()?;
         let res: eyre::Result<_> = {
-            let status = network.publish_post(&tx, &item)?;
+            let status = network.publish_post(&item)?;
             let post = Tooted {
                 guid: item.guid.clone(),
                 status,
@@ -398,11 +398,7 @@ mod null_twitter {
             false
         }
 
-        fn publish_post(
-            &self,
-            _tx: &redb::WriteTransaction,
-            _item: &feed_parrot::feed::NewFeedItem,
-        ) -> eyre::Result<String> {
+        fn publish_post(&self, _item: &feed_parrot::feed::NewFeedItem) -> eyre::Result<String> {
             bail!("Twitter support is not enabled")
         }
 

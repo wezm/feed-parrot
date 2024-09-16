@@ -26,7 +26,7 @@ pub trait SocialNetwork {
 
     fn is_writeable(&self) -> bool;
 
-    fn publish_post(&self, tx: &WriteTransaction, item: &NewFeedItem) -> eyre::Result<String>;
+    fn publish_post(&self, item: &NewFeedItem) -> eyre::Result<String>;
 
     fn mark_post_published(
         &self,
