@@ -17,8 +17,8 @@ use log::{debug, error, info};
 use redb::Database;
 use url::Url;
 
+use feed_parrot::crawler::ConditionalRequest;
 use feed_parrot::crawler::{self, FeedData};
-use feed_parrot::crawler::{ConditionalRequest, SyncType};
 use feed_parrot::mastodon::Mastodon;
 use feed_parrot::social_network::{AccessMode, Registration, SocialNetwork};
 #[cfg(feature = "twitter")]
@@ -247,8 +247,6 @@ fn run(
         .enable_all()
         .build()?;
 
-    let sync_type = SyncType::Initial;
-
     for feed_url in feed_urls {
         // Load the feed from the db
         let mut feed = match db::load_feed(&db, &feed_url) {
@@ -260,12 +258,7 @@ fn run(
             }
         };
 
-        let res = runtime.block_on(crawler::refresh_feed(
-            client.clone(),
-            sync_type,
-            cond_req,
-            &mut feed,
-        ));
+        let res = runtime.block_on(crawler::refresh_feed(client.clone(), cond_req, &mut feed));
 
         let feed_data = match res {
             Ok(feed) => feed,

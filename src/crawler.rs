@@ -92,15 +92,8 @@ struct CrawlOutcome {
     headers: HeaderMap,
 }
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq)]
-pub enum SyncType {
-    Initial,
-    Incremental,
-}
-
 pub async fn refresh_feed(
     client: reqwest::Client,
-    sync_type: SyncType,
     cond_req: ConditionalRequest,
     feed: &mut Feed,
 ) -> Result<FeedData<ParsedFeed>, CrawlError> {
