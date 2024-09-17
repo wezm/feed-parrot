@@ -14,6 +14,57 @@ pub struct MastodonState {
     pub(crate) access_token: String,
 }
 
+#[derive(Serialize)]
+pub enum Visibility {
+    Public,
+    Unlisted,
+    Private,
+    Direct,
+}
+
+#[derive(Serialize)]
+pub(crate) struct NewStatus {
+    /// The text content of the status.
+    ///
+    /// If media_ids is provided, this becomes optional.
+    /// Attaching a poll is optional while status is provided.
+    pub(crate) status: String,
+
+    /// Include Attachment IDs to be attached as media.
+    ///
+    /// If provided, status becomes optional, and poll cannot be used.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub(crate) media_ids: Vec<String>,
+
+    // If provided, media_ids cannot be used, and poll[expires_in] must be provided.
+    // poll: Option<Poll>,
+    /// ID of the status being replied to, if status is a reply.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) in_reply_to_id: Option<String>,
+
+    /// Mark status and attached media as sensitive? Defaults to false.
+    pub(crate) sensitive: bool,
+
+    /// Text to be shown as a warning or subject before the actual content.
+    ///
+    /// Statuses are generally collapsed behind this field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) spoiler_text: Option<String>,
+
+    /// Sets the visibility of the posted status.
+    pub(crate) visibility: Visibility,
+
+    /// ISO 639 language code for this status.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) language: Option<String>,
+    // ISO 8601 Datetime at which to schedule a status.
+    //
+    // Providing this parameter will cause ScheduledStatus to be returned instead of Status.
+    // Must be at least 5 minutes in the future.
+    // #[serde(skip_serializing_if = "Option::is_none")]
+    // scheduled_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct Status {
     #[serde(deserialize_with = "de_id")]

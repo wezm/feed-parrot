@@ -9,6 +9,7 @@ use url::Url;
 
 use crate::db::{self, Tooted};
 use crate::feed::NewFeedItem;
+use crate::mastodon::models::{NewStatus, Visibility};
 use crate::models::Service;
 use crate::social_network::{process_tags, AccessMode, Registration, SocialNetwork};
 
@@ -49,14 +50,17 @@ impl SocialNetwork for Mastodon {
         info!("Post: {}", status_text);
 
         if self.is_writeable() {
-            let _ = client;
-            // let _toot = self.client.new_status(
-            //     StatusBuilder::new()
-            //         .status(status_text)
-            //         .visibility(Visibility::Unlisted)
-            //         .build()?,
-            // )?;
-            todo!("post toot")
+            let status = NewStatus {
+                status: status_text.clone(),
+                media_ids: Vec::new(),
+                in_reply_to_id: None,
+                sensitive: false,
+                spoiler_text: None,
+                visibility: Visibility::Public,
+                language: None,
+            };
+
+            let _status = client::post_status(client, &self.state, &status)?;
         }
         Ok(status_text)
     }

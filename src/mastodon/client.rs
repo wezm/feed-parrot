@@ -5,12 +5,13 @@ use std::io::Write;
 use eyre::eyre;
 use log::{debug, error};
 use reqwest::blocking::{Client, Response};
+use reqwest::header::AUTHORIZATION;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use simple_eyre::eyre;
 use url::Url;
 
-use crate::mastodon::models::MastodonState;
+use crate::mastodon::models::{MastodonState, NewStatus};
 
 const SCOPES: &str = "write:statuses";
 const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
@@ -113,63 +114,23 @@ pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
     Ok(state)
 }
 
-// pub async fn update_archive() -> eyre::Result<()> {
-//     let mut config = Config::read(None)?;
-//     let archive_path = Path::new(&config.archive_path);
-//     let mut archive = File::options()
-//         .create(true)
-//         .append(true)
-//         .open(archive_path)
-//         .wrap_err_with(|| format!("unable to open archive at: {}", archive_path.display()))?;
-//     info!("Opened archive: {}", archive_path.display());
-//
-//     let client = Client::builder()
-//         .user_agent(format!("MArchive {}", env!("CARGO_PKG_VERSION")))
-//         .build()?;
-//
-//     let instance = config.instance_url()?;
-//     let mut url = instance.join("/api/v1/timelines/home")?;
-//     let bearer_token = format!("Bearer {}", config.access_token);
-//     loop {
-//         url.query_pairs_mut().clear().append_pair("limit", "40");
-//         if let Some(ref last_seen_id) = config.last_seen_id {
-//             info!("Fetching statuses since id: {}", last_seen_id);
-//             url.query_pairs_mut().append_pair("min_id", last_seen_id);
-//         } else {
-//             info!("Fetching new statuses");
-//         }
-//
-//         // Fetch home timeline since the last id we have
-//         let resp = client
-//             .get(url.clone())
-//             .header(AUTHORIZATION, &bearer_token)
-//             .send()
-//             .await?;
-//         let statuses: Vec<Status> = json_or_error(resp).await?;
-//         info!("Read {} statuses", statuses.len());
-//
-//         if statuses.is_empty() {
-//             info!("Finished reading statuses");
-//             break;
-//         }
-//
-//         // Persist the statuses we read by appending to the archive, oldest first
-//         for status in statuses.into_iter().rev() {
-//             // FIXME: Ensure config is updated before exiting early from this loop
-//             let json_line = serde_json::to_string(&status)?;
-//             archive.write_all(json_line.as_bytes())?;
-//             archive.write_all(b"\n")?;
-//             config.last_seen_id = Some(status.id);
-//         }
-//         info!("Wrote statuses to archive");
-//
-//         // update the config
-//         config.write()?;
-//         debug!("Config updated");
-//     }
-//
-//     Ok(())
-// }
+pub fn post_status(
+    client: &Client,
+    state: &MastodonState,
+    status: &NewStatus,
+) -> eyre::Result<super::models::Status> {
+    let url = state.instance.join("/api/v1/statuses")?;
+    let bearer_token = format!("Bearer {}", state.access_token);
+    let idempotency_key = "TODO";
+
+    let resp = client
+        .post(url.clone())
+        .header(AUTHORIZATION, &bearer_token)
+        .json(status)
+        .send()?;
+    let xstatus: super::models::Status = json_or_error(resp)?;
+    Ok(xstatus)
+}
 
 fn json_or_error<T: DeserializeOwned>(response: Response) -> eyre::Result<T> {
     if response.status().is_success() {
