@@ -10,7 +10,7 @@ use url::Url;
 use crate::db::{self, Tooted};
 use crate::feed::NewFeedItem;
 use crate::models::Service;
-use crate::social_network::{AccessMode, Registration, SocialNetwork};
+use crate::social_network::{process_tags, AccessMode, Registration, SocialNetwork};
 
 // A Mastodon instance
 pub struct Instance(pub Url);
@@ -76,12 +76,13 @@ impl SocialNetwork for Mastodon {
 }
 
 fn toot_text_from_post(item: &NewFeedItem) -> Option<String> {
-    // let hashtags = categories
-    //     .iter()
-    //     .map(|category| category.hashtag.as_str())
-    //     .collect::<Vec<&str>>()
-    //     .join(" ");
-    let hashtags = "#todo"; // FIXME: Pull from feed item
+    let hashtags = join_to_string::join(
+        process_tags(&item.tags)
+            .into_iter()
+            .map(|tag| format!("#{tag}")),
+    )
+    .separator(" ")
+    .to_string();
 
     let content = item
         .title
@@ -98,7 +99,8 @@ fn toot_text_from_post(item: &NewFeedItem) -> Option<String> {
     // All links are counted as 23 characters.
 
     // Compose the toot
-    let toot = join_to_string::join([content, link, Some(hashtags)].iter().flatten())
+    let hashtags = (!hashtags.is_empty()).then(|| hashtags.as_str());
+    let toot = join_to_string::join([content, link, hashtags].iter().flatten())
         .separator("\n\n")
         .to_string();
 

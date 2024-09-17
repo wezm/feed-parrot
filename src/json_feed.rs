@@ -32,6 +32,7 @@ pub struct Author {
 pub struct Item {
     pub id: String,
     pub url: Option<String>,
+    pub external_url: Option<String>,
     pub title: Option<String>,
     pub content_html: Option<String>,
     pub content_text: Option<String>,
@@ -42,6 +43,7 @@ pub struct Item {
     pub author: Option<Author>,
     #[serde(default)]
     pub attachments: Vec<Attachment>,
+    pub tags: Vec<String>,
 }
 
 #[derive(Deserialize, Clone)]

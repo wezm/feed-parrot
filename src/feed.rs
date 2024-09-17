@@ -13,7 +13,6 @@ pub enum ParsedFeed {
 // TODO: Rename
 #[derive(Debug)]
 pub struct NewFeedItem {
-    // pub feed_id:           FeedId,
     pub guid: String, // TODO: Ensure not empty
     pub guid_id_permalink: bool,
     pub url: Option<String>,
@@ -21,9 +20,9 @@ pub struct NewFeedItem {
     pub author: Option<String>,
     pub summary: Option<String>,
     pub content: Option<String>,
+    pub tags: Vec<String>,
     pub date_published: Option<DateTime<Utc>>,
     pub date_modified: Option<DateTime<Utc>>,
-    pub notified_at: Option<DateTime<Utc>>,
 }
 
 impl From<atom::Entry> for NewFeedItem {
@@ -35,7 +34,6 @@ impl From<atom::Entry> for NewFeedItem {
             .to_string();
         let url = entry.links.first().map(|link| link.href.to_owned()); // FIXME: Better way to select link that filters on rel and mime type
         NewFeedItem {
-            // feed_id: FeedId(),
             guid: entry.id,
             guid_id_permalink: url.is_none(),
             url,
@@ -43,9 +41,13 @@ impl From<atom::Entry> for NewFeedItem {
             author: (!author.is_empty()).then_some(author),
             summary: entry.summary.map(|summary| summary.value), // FIXME: This can be HTML as well; handle that
             content: entry.content.and_then(|content| content.value),
+            tags: entry
+                .categories
+                .into_iter()
+                .filter_map(|cat| cat.scheme.is_none().then_some(cat.term))
+                .collect(),
             date_published: entry.published.map(|published| published.to_utc()),
             date_modified: Some(entry.updated.to_utc()),
-            notified_at: None,
         }
     }
 }
@@ -150,9 +152,13 @@ impl TryFrom<rss::Item> for NewFeedItem {
             author: item.author,
             summary: item.description,
             content: item.content,
+            tags: item
+                .categories
+                .into_iter()
+                .filter_map(|cat| cat.domain.is_none().then_some(cat.name))
+                .collect(),
             date_published,      // FIXME: Handle atom:published
             date_modified: None, // FIXME: Handle atom:updated
-            notified_at: None,
         })
     }
 }
@@ -175,7 +181,7 @@ impl From<json_feed::Item> for NewFeedItem {
             content: item.content_html,
             date_published,
             date_modified,
-            notified_at: None,
+            tags: item.tags,
         }
     }
 }
