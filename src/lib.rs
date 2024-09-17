@@ -93,21 +93,21 @@ mod tests {
     #[test]
     fn test_parse_delay_err() {
         let d = "10".parse::<Delay>().unwrap_err();
-        assert_eq!(d, "delay must end with 's' or 'm'");
+        assert_eq!(d.0, "delay must end with 's' or 'm'");
 
         let d = "10h".parse::<Delay>().unwrap_err();
-        assert_eq!(d, "delay must end with 's' or 'm'");
+        assert_eq!(d.0, "delay must end with 's' or 'm'");
 
         let d = "-10s".parse::<Delay>().unwrap_err();
-        assert_eq!(d, "-10s is not a valid delay");
+        assert_eq!(d.0, "-10s is not a valid delay");
 
         let d = "10ss".parse::<Delay>().unwrap_err();
-        assert_eq!(d, "10ss is not a valid delay");
+        assert_eq!(d.0, "10ss is not a valid delay");
 
         let d = "1000000s".parse::<Delay>().unwrap_err();
-        assert_eq!(d, "1000000s is not a valid delay");
+        assert_eq!(d.0, "1000000s is not a valid delay");
 
         let d = "2000m".parse::<Delay>().unwrap_err();
-        assert_eq!(d, "2000m is too big");
+        assert_eq!(d.0, "2000m is too big");
     }
 }
