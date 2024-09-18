@@ -7,21 +7,22 @@ use chrono::Utc;
 use env_logger;
 use env_logger::Env;
 use eyre::{bail, Context};
-use feed_parrot::db::Tooted;
 use feed_parrot::feed::ParsedFeed;
 use feed_parrot::mastodon::models::MastodonState;
 use feed_parrot::models::{Service, Services};
 use feed_parrot::{db, mastodon};
 use getopts::Options;
-use log::{debug, error, info};
-use redb::Database;
+use log::{debug, error, info, warn};
+use redb::{Database, WriteTransaction};
 use reqwest::blocking::Client;
 use url::Url;
 
 use feed_parrot::crawler::ConditionalRequest;
 use feed_parrot::crawler::{self, FeedData};
 use feed_parrot::mastodon::Mastodon;
-use feed_parrot::social_network::{AccessMode, Registration, SocialNetwork};
+use feed_parrot::social_network::{
+    AccessMode, Posted, Registration, SocialNetwork, ValidationResult,
+};
 #[cfg(feature = "twitter")]
 use feed_parrot::twitter::Twitter;
 use feed_parrot::Delay;
@@ -299,23 +300,30 @@ fn announce_new_posts(
             item.title.as_deref().unwrap_or("<empty>")
         );
 
-        // TODO: get the network to prepare the post before sending it so we can check the content table
+        let status = network.prepare_post(&item)?;
+        let ready_post = match status.validate(&db, network.service()) {
+            ValidationResult::Ok(ok) => ok,
+            ValidationResult::Duplicate(post) => {
+                warn!("post is a duplicate [{}]", item.guid);
+                continue;
+            }
+            ValidationResult::Error(err) => {
+                error!("Unable to publish post [{}]: {:?}", item.guid, err);
+                continue;
+            }
+        };
 
         let tx = db.begin_write()?;
         let res: eyre::Result<_> = {
-            let status = network.publish_post(&client, &item)?;
-            let post = Tooted {
-                guid: item.guid.clone(),
-                status,
-                at: Utc::now(),
-            };
-            network.mark_post_published(&tx, network.service(), post)?;
+            let posted = network.publish_post(&client, ready_post)?;
+            mark_post_published(&tx, network, posted)?;
             Ok(())
         };
 
         match res {
             Ok(()) => tx.commit()?,
             Err(err) => {
+                // FIXME: Is there a better way to rollback?
                 drop(tx);
                 error!("Unable to publish post [{}]: {:?}", item.guid, err);
             }
@@ -372,13 +380,27 @@ fn register(
     }
 }
 
+fn mark_post_published(
+    tx: &WriteTransaction,
+    network: &dyn SocialNetwork,
+    post: Posted,
+) -> eyre::Result<()> {
+    if network.is_writeable() {
+        db::mark_post_tooted(tx, network.service(), post)?;
+    }
+
+    Ok(())
+}
+
 mod null_twitter {
     use eyre::bail;
+    use feed_parrot::feed::NewFeedItem;
+    use feed_parrot::social_network::{Posted, PotentialPost, ReadyPost};
     use feed_parrot::{
         models::Service,
         social_network::{Registration, SocialNetwork},
     };
-    use redb::WriteTransaction;
+
     use reqwest::blocking::Client;
 
     pub struct Twitter;
@@ -398,20 +420,11 @@ mod null_twitter {
             false
         }
 
-        fn publish_post(
-            &self,
-            _client: &Client,
-            _item: &feed_parrot::feed::NewFeedItem,
-        ) -> eyre::Result<String> {
+        fn prepare_post(&self, item: &NewFeedItem) -> eyre::Result<PotentialPost> {
             bail!("Twitter support is not enabled")
         }
 
-        fn mark_post_published(
-            &self,
-            _tx: &WriteTransaction,
-            _service: Service,
-            _toot: feed_parrot::db::Tooted,
-        ) -> eyre::Result<()> {
+        fn publish_post(&self, _client: &Client, _post: ReadyPost) -> eyre::Result<Posted> {
             bail!("Twitter support is not enabled")
         }
     }

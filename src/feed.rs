@@ -25,6 +25,20 @@ pub struct NewFeedItem {
     pub date_modified: Option<DateTime<Utc>>,
 }
 
+pub struct PostGuid(String);
+
+impl PostGuid {
+    pub(crate) fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl NewFeedItem {
+    pub fn guid(&self) -> PostGuid {
+        PostGuid(self.guid.clone())
+    }
+}
+
 impl From<atom::Entry> for NewFeedItem {
     fn from(entry: atom::Entry) -> Self {
         // TODO: Use intersperse when stable

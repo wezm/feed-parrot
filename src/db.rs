@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 use url::Url;
 
 use crate::models::{Service, Services};
+use crate::social_network::Posted;
 
 const HASH_LEN: usize = 32;
 
@@ -51,12 +52,6 @@ pub struct Feed {
     pub etag: Option<String>,
     pub last_modified: Option<DateTime<Utc>>,
     pub last_refresh_hash: Option<[u8; HASH_LEN]>,
-}
-
-pub struct Tooted {
-    pub guid: String,
-    pub status: String,
-    pub at: DateTime<Utc>,
 }
 
 pub struct ServiceData {
@@ -163,22 +158,37 @@ pub fn save_feed(tx: &WriteTransaction, feed: &Feed) -> Result<(), redb::Error> 
     Ok(())
 }
 
+pub enum AlreadyPosted {
+    Yes,
+    No(blake3::Hash),
+}
+
 /// Checks if the supplied content has been tooted before.
 ///
 /// Returns `true` if tooted before.
-pub fn already_posted(db: &Database, service: Service, content: &str) -> Result<bool, redb::Error> {
+pub fn already_posted(
+    db: &Database,
+    service: Service,
+    content: &str,
+) -> Result<AlreadyPosted, redb::Error> {
     let hash = blake3::hash(content.as_bytes());
 
     let read_txn = db.begin_read()?;
     let table = match read_txn.open_table(POSTS_TABLE) {
         Ok(table) => table,
-        Err(TableError::TableDoesNotExist(_)) => return Ok(false),
+        Err(TableError::TableDoesNotExist(_)) => return Ok(AlreadyPosted::No(hash)),
         Err(e) => return Err(e.into()),
     };
 
     table
         .get((service, *hash.as_bytes()))
-        .map(|access| access.is_some())
+        .map(|access| {
+            if access.is_some() {
+                AlreadyPosted::Yes
+            } else {
+                AlreadyPosted::No(hash)
+            }
+        })
         .map_err(redb::Error::from)
 }
 
@@ -202,15 +212,14 @@ pub fn item_posted(db: &Database, service: Service, guid: &str) -> Result<bool, 
 pub fn mark_post_tooted(
     tx: &WriteTransaction,
     service: Service,
-    toot: Tooted,
+    toot: Posted,
 ) -> Result<(), redb::Error> {
     // let write_txn = db.begin_write()?;
     // {
     let mut tooted_table = tx.open_table(POSTED_ITEMS_TABLE)?;
     let mut toots_table = tx.open_table(POSTS_TABLE)?;
-    let hash = blake3::hash(toot.status.as_bytes()); // FIXME: avoid calculating the hash twice
     tooted_table.insert((service, toot.guid.as_str()), toot.at.timestamp())?;
-    toots_table.insert((service, *hash.as_bytes()), toot.at.timestamp())?;
+    toots_table.insert((service, *toot.hash.as_bytes()), toot.at.timestamp())?;
     // }
     // write_txn.commit()?;
     Ok(())
@@ -284,6 +293,16 @@ pub mod debug {
     pub fn delete_feeds(db: &Database) -> eyre::Result<()> {
         let tx = db.begin_write()?;
         tx.delete_table(FEED_TABLE)?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn mark_as_new(db: &Database, service: Service, guid: &str) -> eyre::Result<()> {
+        let tx = db.begin_write()?;
+        {
+            let mut tooted_table = tx.open_table(POSTED_ITEMS_TABLE)?;
+            tooted_table.remove((service, guid))?;
+        }
         tx.commit()?;
         Ok(())
     }

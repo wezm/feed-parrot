@@ -4,7 +4,7 @@
 </h1>
 
 <div align="center">
-  <strong>Post entries from an RSS feed to Mastodon. Runs on BSD, Linux, macOS, Windows, and
+  <strong>Post entries from an Atom/RSS/JSON feed to Mastodon. Runs on BSD, Linux, macOS, Windows, and
   more.</strong>
 </div>
 

@@ -1,17 +1,19 @@
 mod client;
 pub mod models;
 
-use eyre::bail;
+use eyre::eyre;
 use models::MastodonState;
-use redb::{Database, WriteTransaction};
+use redb::Database;
 use reqwest::blocking::Client;
 use url::Url;
 
-use crate::db::{self, Tooted};
+use crate::db::{self};
 use crate::feed::NewFeedItem;
 use crate::mastodon::models::{NewStatus, Visibility};
 use crate::models::Service;
-use crate::social_network::{process_tags, AccessMode, Registration, SocialNetwork};
+use crate::social_network::{
+    process_tags, AccessMode, Posted, PotentialPost, ReadyPost, Registration, SocialNetwork,
+};
 
 // A Mastodon instance
 pub struct Instance(pub Url);
@@ -42,16 +44,18 @@ impl SocialNetwork for Mastodon {
         self.access_mode == AccessMode::ReadWrite
     }
 
-    fn publish_post(&self, client: &Client, item: &NewFeedItem) -> eyre::Result<String> {
-        let Some(status_text) = toot_text_from_post(item) else {
-            bail!("Unable to compose toot for {:?}", item);
-        };
+    fn prepare_post(&self, item: &NewFeedItem) -> eyre::Result<PotentialPost> {
+        let text = toot_text_from_post(item)
+            .ok_or_else(|| eyre!("Unable to compose toot for {:?}", item))?;
+        Ok(PotentialPost(text, item.guid()))
+    }
 
-        info!("Post: {}", status_text);
+    fn publish_post(&self, client: &Client, post: ReadyPost) -> eyre::Result<Posted> {
+        info!("Post: {}", post.text());
 
         if self.is_writeable() {
             let status = NewStatus {
-                status: status_text.clone(),
+                status: post.text().to_string(),
                 media_ids: Vec::new(),
                 in_reply_to_id: None,
                 sensitive: false,
@@ -62,20 +66,7 @@ impl SocialNetwork for Mastodon {
 
             let _status = client::post_status(client, &self.state, &status)?;
         }
-        Ok(status_text)
-    }
-
-    fn mark_post_published(
-        &self,
-        tx: &WriteTransaction,
-        service: Service,
-        post: Tooted,
-    ) -> eyre::Result<()> {
-        if self.is_writeable() {
-            db::mark_post_tooted(tx, service, post)?;
-        }
-
-        Ok(())
+        Ok(Posted::from(post))
     }
 }
 
