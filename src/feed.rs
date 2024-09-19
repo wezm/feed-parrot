@@ -14,7 +14,6 @@ pub enum ParsedFeed {
 #[derive(Debug)]
 pub struct NewFeedItem {
     pub guid: String, // TODO: Ensure not empty
-    pub guid_id_permalink: bool,
     pub url: Option<String>,
     pub title: Option<String>,
     pub author: Option<String>,
@@ -49,7 +48,6 @@ impl From<atom::Entry> for NewFeedItem {
         let url = entry.links.first().map(|link| link.href.to_owned()); // FIXME: Better way to select link that filters on rel and mime type
         NewFeedItem {
             guid: entry.id,
-            guid_id_permalink: url.is_none(),
             url,
             title: Some(entry.title.value), // FIXME: This can be HTML as well; handle that
             author: (!author.is_empty()).then_some(author),
@@ -160,7 +158,6 @@ impl TryFrom<rss::Item> for NewFeedItem {
                 .guid
                 .map(|guid| guid.value)
                 .ok_or_else(|| TryFromRssItemError::NoGuid)?,
-            guid_id_permalink,
             url: item.link,
             title: item.title,
             author: item.author,
@@ -187,7 +184,6 @@ impl From<json_feed::Item> for NewFeedItem {
             .and_then(|mod_date| parse_rfc2822(&mod_date).ok());
         NewFeedItem {
             guid: item.id,
-            guid_id_permalink: item.url.is_none(),
             url: item.url,
             title: item.title,
             author: item.author.and_then(|author| author.name),
