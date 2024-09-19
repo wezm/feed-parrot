@@ -11,16 +11,12 @@
 <br>
 
 <div align="center">
-  <a href="https://cirrus-ci.com/github/wezm/feed-parrot">
-    <img src="https://api.cirrus-ci.com/github/wezm/feed-parrot.svg" alt="Build Status"></a>
-  <a href="https://crates.io/crates/feed-parrot">
-    <img src="https://img.shields.io/crates/v/feed-parrot.svg" alt="Version">
-  </a>
+  <a href="https://cirrus-ci.com/github/wezm/feed-parrot"><img src="https://api.cirrus-ci.com/github/wezm/feed-parrot.svg" alt="Build Status"></a>
+  <a href="https://crates.io/crates/feed-parrot"><img src="https://img.shields.io/crates/v/feed-parrot.svg" alt="Version"></a>
   <img src="https://img.shields.io/crates/l/feed-parrot.svg" alt="License">
 </div>
 
 <br>
-
 
 TODO: Write longer description here.
 
