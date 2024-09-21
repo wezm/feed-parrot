@@ -1,10 +1,15 @@
+// Some of the code in this module is derived from twitter-text
+// Apache-2.0
+// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/rb/lib/twitter-text/extractor.rb
+// https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/rb/lib/twitter-text/regex.rb
+
 use std::sync::LazyLock;
 
 use fancy_regex::Regex;
 
 const MAX_DOMAIN_LENGTH: usize = 253;
 
-const USERNAME_RE: &str = "((?i)[a-z0-9_]+(?:[a-z0-9_.-]+[a-z0-9_]+)?)"; // i
+const USERNAME_RE: &str = "((?i)[a-z0-9_]+(?:[a-z0-9_.-]+[a-z0-9_]+)?)";
 
 // Ruby also supports the following non-POSIX character classes:
 //
@@ -33,53 +38,99 @@ const LATIN_ACCENT_CHARS: &[(char, char)] = &[
     ('\u{028b}', '\u{028b}'),
     ('\u{02bb}', '\u{02bb}'),
     ('\u{0300}', '\u{036f}'),
-    ('\u{1e00}', '\u{1eff}')
+    ('\u{1e00}', '\u{1eff}'),
 ];
 
 static MENTION_RE: LazyLock<Regex> = LazyLock::new(|| {
-    let expr = format!(r"(?<![=/[{word}]])@{USERNAME_RE}(?:@([{word}.-]+[{word}]+))?", word = WORD);
+    let expr = format!(
+        r"(?<![=/[{word}]])@{USERNAME_RE}(?:@([{word}.-]+[{word}]+))?",
+        word = WORD
+    );
     Regex::new(&expr).unwrap()
 });
 
 static END_MENTION_MATCH: LazyLock<Regex> = LazyLock::new(|| {
-    let latin_accents = LATIN_ACCENT_CHARS.iter().copied().fold(String::new(), |mut string, (start, end)| {
-        string.push(start);
-        if start != end {
-            string.push('-');
-            string.push(end);
-        }
-        string
-    });
+    let latin_accents =
+        LATIN_ACCENT_CHARS
+            .iter()
+            .copied()
+            .fold(String::new(), |mut string, (start, end)| {
+                string.push(start);
+                if start != end {
+                    string.push('-');
+                    string.push(end);
+                }
+                string
+            });
     let expr = format!(r"(?i)\A(?:{AT_SIGNS}|[{latin_accents}]+|://)");
     Regex::new(&expr).unwrap()
 });
 
+// This regex was generated as follows:
+// 1. Start a GitHub Codespace for the Mastodon project as described at:
+//    https://github.com/mastodon/mastodon/blob/7ed9c590b98610f8d68deab9ef8df260eec6d8f0/README.md#github-codespaces
+// 2. Connect to it in VS Code (doing so in Firefox didn't work, maybe Chrome would)
+// 3. Run `bin/rails console`
+// 4. Evaluate the following in the console:
+//    File::open('re', 'w') { |f| f.puts Twitter::TwitterText::Regex::REGEXEN[:valid_url].inspect }
+// 5. Download the contents of the 're' file to valid_url.regex
+// 6. Delete opening and closing /'s
+// 7. Replace instances of \/ with /
+// 8. Remove leading whitespace from first line and add (?ix) inside first paren
+const VALID_URL_RE: &str = include_str!("valid_url.regex");
+static VALID_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(&VALID_URL_RE).unwrap());
+
 struct Mention<'a>(fancy_regex::Captures<'a>);
 
-fn detect_mentions(text: &str) -> Option<impl Iterator<Item=fancy_regex::Result<Mention<'_>>>> {
+struct Url<'a>(fancy_regex::Match<'a>);
+
+fn detect_mentions(text: &str) -> Option<impl Iterator<Item = fancy_regex::Result<Mention<'_>>>> {
     if !text.contains('@') {
         return None;
     }
 
-    Some(MENTION_RE.captures_iter(text)
-        .filter_map(|captures| {
-            let captures = match captures {
-                Ok(captures) => captures,
-                Err(err) => return Some(Err(err))
-            };
-            let mention = Mention(captures);
+    Some(MENTION_RE.captures_iter(text).filter_map(|captures| {
+        let captures = match captures {
+            Ok(captures) => captures,
+            Err(err) => return Some(Err(err)),
+        };
+        let mention = Mention(captures);
 
-            let after = text.get(mention.end()..)?;
-            let after_matches = match dbg!(END_MENTION_MATCH.is_match(after)) {
-                Ok(x) => x,
-                Err(err) => return Some(Err(err)),
-            };
+        let after = text.get(mention.end()..)?;
+        let after_matches = match dbg!(END_MENTION_MATCH.is_match(after)) {
+            Ok(x) => x,
+            Err(err) => return Some(Err(err)),
+        };
 
-            if after_matches || domain_too_long(mention.domain()) {
-                return None;
-            }
-            Some(Ok(mention))
-        }))
+        if after_matches || domain_too_long(mention.domain()) {
+            return None;
+        }
+        Some(Ok(mention))
+    }))
+}
+
+fn detect_urls(text: &str) -> fancy_regex::Result<Vec<Url>> {
+    if !text.contains(':') {
+        return Ok(Vec::new());
+    }
+
+    let mut urls = Vec::new();
+    for captures in VALID_URL.captures_iter(text) {
+        let captures = captures?;
+        dbg!(&captures[1], &captures[2], &captures[3]);
+
+        if captures.get(4).is_none() {
+            // missing protocol
+            continue;
+        }
+        let Some(url) = captures.get(3) else {
+            continue;
+        };
+
+        urls.push(Url(url));
+    }
+
+    Ok(urls)
 }
 
 fn domain_too_long(domain: Option<&str>) -> bool {
@@ -110,45 +161,109 @@ impl Mention<'_> {
     }
 }
 
+impl Url<'_> {
+    pub fn start(&self) -> usize {
+        self.0.start()
+    }
+
+    pub fn end(&self) -> usize {
+        self.0.end()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0.as_str()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn collect_mentions<'a>(iter: Option<impl Iterator<Item=fancy_regex::Result<Mention<'a>>>>) -> Vec<String> {
+    fn collect_mentions<'a>(
+        iter: Option<impl Iterator<Item = fancy_regex::Result<Mention<'a>>>>,
+    ) -> Vec<String> {
         match iter {
             None => Vec::new(),
-            Some(iter) => iter.map(|mention| mention.map(|m| m.as_str().to_string()).unwrap()).collect()
+            Some(iter) => iter
+                .map(|mention| mention.map(|m| m.as_str().to_string()).unwrap())
+                .collect(),
         }
     }
 
     #[test]
     fn test_detect_mentions() {
-        assert_eq!(collect_mentions(detect_mentions("@wezm")), &["@wezm".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("some @wezm")), &["@wezm".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("some @wezm.")), &["@wezm".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("some @wezm@mastodon.decentralied.social.")), &["@wezm@mastodon.decentralied.social".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("@one @two @three ok")), &["@one".to_string(), "@two".to_string(), "@three".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("test @test@wòw.com ok")), &["@test@wòw.com".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("test @Test@Wòw.Com ok")), &["@Test@Wòw.Com".to_string()]);
-        assert_eq!(collect_mentions(detect_mentions("An email: test@example.com")), Vec::<String>::new());
-        assert_eq!(collect_mentions(detect_mentions("An email: @user@")), Vec::<String>::new());
+        assert_eq!(
+            collect_mentions(detect_mentions("@wezm")),
+            &["@wezm".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("some @wezm")),
+            &["@wezm".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("some @wezm.")),
+            &["@wezm".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("some @wezm@mastodon.decentralied.social.")),
+            &["@wezm@mastodon.decentralied.social".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("@one @two @three ok")),
+            &["@one".to_string(), "@two".to_string(), "@three".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("test @test@wòw.com ok")),
+            &["@test@wòw.com".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("test @Test@Wòw.Com ok")),
+            &["@Test@Wòw.Com".to_string()]
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("An email: test@example.com")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("An email: @user@")),
+            Vec::<String>::new()
+        );
         assert_eq!(collect_mentions(detect_mentions("")), Vec::<String>::new());
-        assert_eq!(collect_mentions(detect_mentions("@test@example-domain.com.au")), &["@test@example-domain.com.au".to_string()]);
+        assert_eq!(
+            collect_mentions(detect_mentions("@test@example-domain.com.au")),
+            &["@test@example-domain.com.au".to_string()]
+        );
     }
 
     #[test]
     fn test_detect_mentions_after() {
-        assert_eq!(collect_mentions(detect_mentions("@user@")), Vec::<String>::new());
-        assert_eq!(collect_mentions(detect_mentions("@café")), Vec::<String>::new());
+        assert_eq!(
+            collect_mentions(detect_mentions("@user@")),
+            Vec::<String>::new()
+        );
+        assert_eq!(
+            collect_mentions(detect_mentions("@café")),
+            Vec::<String>::new()
+        );
     }
 
     #[test]
     fn extract_username_and_domain() {
-        let mentions = detect_mentions("some @one @two@example.com ").unwrap().collect::<Result<Vec<_>, _>>().unwrap();
+        let mentions = detect_mentions("some @one @two@example.com ")
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         assert_eq!(mentions[0].username(), "one");
         assert_eq!(mentions[0].domain(), None);
 
         assert_eq!(mentions[1].username(), "two");
         assert_eq!(mentions[1].domain(), Some("example.com"));
+    }
+
+    #[test]
+    fn test_detect_urls() {
+        let urls = detect_urls("Test https://example.com/ wezm.net").unwrap();
+        let urls = urls.iter().map(|u| u.as_str()).collect::<Vec<_>>();
+        assert_eq!(urls, vec!["https://example.com/".to_string()]);
     }
 }

@@ -12,6 +12,7 @@ egg-mode = { version = "0", default-features = false, features = ["hyper-rustls"
 encoding = "0.2.33"
 env_logger = { version = "0.11.5", default-features = false, features = ["humantime"]}
 eyre = "0.6.12"
+fancy-regex = "0.13.0"
 getopts = "0"
 join_to_string = "0.1.3"
 log = "0.4"
@@ -30,3 +31,6 @@ xhtmlchardet = "2.2.0"
 [features]
 default = []
 twitter = ["egg-mode"]
+
+[profile.test]
+opt-level = 1 # make the valid url regex faster
