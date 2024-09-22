@@ -80,11 +80,18 @@ static END_MENTION_MATCH: LazyLock<Regex> = LazyLock::new(|| {
 const VALID_URL_RE: &str = include_str!("valid_url.regex");
 static VALID_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(&VALID_URL_RE).unwrap());
 
-struct Mention<'a>(fancy_regex::Captures<'a>);
+pub(super) struct Mention<'a>(fancy_regex::Captures<'a>);
 
-struct Url<'a>(fancy_regex::Match<'a>);
+pub(super) struct Url<'a>(fancy_regex::Match<'a>);
 
-fn detect_mentions(text: &str) -> Option<impl Iterator<Item = fancy_regex::Result<Mention<'_>>>> {
+pub(super) enum Entity<'a> {
+    Url(Url<'a>),
+    Mention(Mention<'a>),
+}
+
+pub(super) fn detect_mentions(
+    text: &str,
+) -> Option<impl Iterator<Item = fancy_regex::Result<Mention<'_>>>> {
     if !text.contains('@') {
         return None;
     }
@@ -109,28 +116,29 @@ fn detect_mentions(text: &str) -> Option<impl Iterator<Item = fancy_regex::Resul
     }))
 }
 
-fn detect_urls(text: &str) -> fancy_regex::Result<Vec<Url>> {
+pub(super) fn detect_urls(
+    text: &str,
+) -> Option<impl Iterator<Item = fancy_regex::Result<Url<'_>>>> {
     if !text.contains(':') {
-        return Ok(Vec::new());
+        return None;
     }
 
-    let mut urls = Vec::new();
-    for captures in VALID_URL.captures_iter(text) {
-        let captures = captures?;
-        dbg!(&captures[1], &captures[2], &captures[3]);
+    Some(VALID_URL.captures_iter(text).filter_map(|captures| {
+        let captures = match captures {
+            Ok(captures) => captures,
+            Err(err) => return Some(Err(err)),
+        };
 
         if captures.get(4).is_none() {
             // missing protocol
-            continue;
+            return None;
         }
         let Some(url) = captures.get(3) else {
-            continue;
+            return None;
         };
 
-        urls.push(Url(url));
-    }
-
-    Ok(urls)
+        Some(Ok(Url(url)))
+    }))
 }
 
 fn domain_too_long(domain: Option<&str>) -> bool {
@@ -172,6 +180,41 @@ impl Url<'_> {
 
     pub fn as_str(&self) -> &str {
         &self.0.as_str()
+    }
+}
+
+impl Entity<'_> {
+    pub fn start(&self) -> usize {
+        match self {
+            Entity::Url(url) => url.start(),
+            Entity::Mention(mention) => mention.start(),
+        }
+    }
+
+    pub fn end(&self) -> usize {
+        match self {
+            Entity::Url(url) => url.end(),
+            Entity::Mention(mention) => mention.end(),
+        }
+    }
+
+    pub fn as_str(&self) -> &str {
+        match self {
+            Entity::Url(url) => url.as_str(),
+            Entity::Mention(mention) => mention.as_str(),
+        }
+    }
+}
+
+impl<'a> From<Url<'a>> for Entity<'a> {
+    fn from(url: Url<'a>) -> Self {
+        Entity::Url(url)
+    }
+}
+
+impl<'a> From<Mention<'a>> for Entity<'a> {
+    fn from(mention: Mention<'a>) -> Self {
+        Entity::Mention(mention)
     }
 }
 
@@ -262,7 +305,10 @@ mod tests {
 
     #[test]
     fn test_detect_urls() {
-        let urls = detect_urls("Test https://example.com/ wezm.net").unwrap();
+        let urls = detect_urls("Test https://example.com/ wezm.net")
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap();
         let urls = urls.iter().map(|u| u.as_str()).collect::<Vec<_>>();
         assert_eq!(urls, vec!["https://example.com/".to_string()]);
     }
