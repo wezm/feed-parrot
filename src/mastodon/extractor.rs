@@ -103,6 +103,7 @@ pub(super) fn detect_entities(text: &str) -> eyre::Result<Vec<Entity>> {
     Ok(entities)
 }
 
+// Returns None if there are no mentions. May still return an empty iterator.
 pub(super) fn detect_mentions(
     text: &str,
 ) -> Option<impl Iterator<Item = fancy_regex::Result<Mention<'_>>>> {
@@ -118,7 +119,7 @@ pub(super) fn detect_mentions(
         let mention = Mention(captures);
 
         let after = text.get(mention.end()..)?;
-        let after_matches = match dbg!(END_MENTION_MATCH.is_match(after)) {
+        let after_matches = match END_MENTION_MATCH.is_match(after) {
             Ok(x) => x,
             Err(err) => return Some(Err(err)),
         };
@@ -130,6 +131,7 @@ pub(super) fn detect_mentions(
     }))
 }
 
+// Returns None if there are no mentions. May still return an empty iterator.
 pub(super) fn detect_urls(
     text: &str,
 ) -> Option<impl Iterator<Item = fancy_regex::Result<Url<'_>>>> {
