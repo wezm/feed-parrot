@@ -89,6 +89,20 @@ pub(super) enum Entity<'a> {
     Mention(Mention<'a>),
 }
 
+pub(super) fn detect_entities(text: &str) -> eyre::Result<Vec<Entity>> {
+    let mut entities = Vec::new();
+    if let Some(urls) = detect_urls(text) {
+        let urls = urls.collect::<Result<Vec<_>, _>>()?;
+        entities.extend(urls.into_iter().map(Entity::from));
+    }
+    if let Some(mentions) = detect_mentions(text) {
+        let mentions = mentions.collect::<Result<Vec<_>, _>>()?;
+        entities.extend(mentions.into_iter().map(Entity::from));
+    }
+    entities.sort_by_key(|e| e.start());
+    Ok(entities)
+}
+
 pub(super) fn detect_mentions(
     text: &str,
 ) -> Option<impl Iterator<Item = fancy_regex::Result<Mention<'_>>>> {
