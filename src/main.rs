@@ -1,7 +1,10 @@
 use std::env::{self, VarError};
+use std::fs::File;
+use std::io::{BufRead, BufReader};
 use std::process::ExitCode;
 use std::time::Duration;
 use std::{process, thread};
+use url::Url;
 
 use chrono::Utc;
 use env_logger;
@@ -15,7 +18,6 @@ use getopts::Options;
 use log::{debug, error, info, warn};
 use redb::{Database, WriteTransaction};
 use reqwest::blocking::Client;
-use url::Url;
 
 use feed_parrot::crawler::ConditionalRequest;
 use feed_parrot::crawler::{self, FeedData};
@@ -62,17 +64,18 @@ fn try_main() -> eyre::Result<()> {
 
     let mut opts = Options::new();
     opts.optopt("d", "database", "path to database file", "FILE");
+    opts.optflag("h", "help", "print this help information");
+    opts.optopt("i", "instance", "instance to register to", "URL");
     opts.optflag("n", "dryrun", "don't post statuses or update the db");
+    opts.optflag("r", "register", "register with a service (requires -s)");
     opts.optmulti("s", "service", "filter action by service", "SERVICE");
+    opts.optopt("u", "url-file", "read feed URLs from FILE", "FILE");
     opts.optopt(
         "w",
         "wait",
         "time to wait between posting new items",
         "DURATION",
     );
-    opts.optflag("r", "register", "register with a service (requires -s)");
-    opts.optopt("i", "instance", "instance to register to", "URL");
-    opts.optflag("h", "help", "print this help information");
     opts.optflag("", "no-cache", "ignore stored cache headers");
     let matches = opts.parse(&args[1..])?;
 
@@ -141,11 +144,23 @@ fn try_main() -> eyre::Result<()> {
         } else {
             Services::Specific(services)
         };
-        let urls = matches
+
+        let mut urls = matches
             .free
             .iter()
             .map(|url| Url::parse(url))
             .collect::<Result<Vec<_>, _>>()?;
+        if let Some(path) = matches.opt_str("u") {
+            let file = BufReader::new(File::open(&path)?);
+            for line in file.lines() {
+                let line = line?;
+                let url = Url::parse(&line)?;
+                urls.push(url);
+            }
+        };
+        urls.sort();
+        urls.dedup();
+
         let cond_req = if matches.opt_present("no-cache") {
             ConditionalRequest::Disabled
         } else {
