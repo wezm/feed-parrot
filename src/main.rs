@@ -33,6 +33,14 @@ const LOG_ENV_VAR: &str = "FEED_PARROT_LOG";
 const DATABASE_ENV_VAR: &str = "FEED_PARROT_DATABASE";
 const TIMEOUT: Duration = Duration::from_secs(30);
 
+#[derive(Copy, Clone)]
+struct FeedParrot<'a> {
+    access_mode: AccessMode,
+    cond_req: ConditionalRequest,
+    services: &'a Services,
+    feed_urls: &'a [Url],
+}
+
 fn main() -> ExitCode {
     match simple_eyre::install() {
         Ok(()) => (),
@@ -166,7 +174,13 @@ fn try_main() -> eyre::Result<()> {
         } else {
             ConditionalRequest::Enabled
         };
-        run(&db, client.clone(), access_mode, cond_req, &services, &urls)
+        let settings = FeedParrot {
+            access_mode,
+            cond_req,
+            services: &services,
+            feed_urls: &urls,
+        };
+        run(&db, client.clone(), settings)
     }
 }
 
@@ -175,22 +189,18 @@ fn print_usage(program: &str, opts: &Options) {
     eprint!("{}", opts.usage(&brief));
 }
 
-fn run(
-    db: &Database,
-    client: Client,
-    access_mode: AccessMode,
-    cond_req: ConditionalRequest,
-    services: &Services,
-    feed_urls: &[Url],
-) -> eyre::Result<()> {
-    let services = db::load_services(db, services)?
+fn run(db: &Database, client: Client, settings: FeedParrot<'_>) -> eyre::Result<()> {
+    let services = db::load_services(db, settings.services)?
         .into_iter()
         .map(|service_data| {
             // Turn the service data into SocialMedia trait objects
             match service_data.service {
                 Service::Mastodon => {
                     let state: MastodonState = rmp_serde::from_slice(&service_data.data)?;
-                    Ok(Box::from(Mastodon { access_mode, state }) as Box<dyn SocialNetwork>)
+                    Ok(Box::from(Mastodon {
+                        access_mode: settings.access_mode,
+                        state,
+                    }) as Box<dyn SocialNetwork>)
                 }
                 Service::Twitter => todo!(),
             }
@@ -201,11 +211,11 @@ fn run(
     }
 
     // For each feed, fetch it and pass new entries to announce new posts for each enabled service
-    if feed_urls.is_empty() {
+    if settings.feed_urls.is_empty() {
         bail!("no feeds URLs supplied")
     }
 
-    for feed_url in feed_urls {
+    for feed_url in settings.feed_urls {
         // Load the feed from the db
         let mut feed = match db::load_feed(&db, &feed_url) {
             Ok(feed) => feed,
@@ -216,7 +226,7 @@ fn run(
             }
         };
 
-        let res = crawler::refresh_feed(client.clone(), cond_req, &mut feed);
+        let res = crawler::refresh_feed(client.clone(), settings.cond_req, &mut feed);
 
         let feed_data = match res {
             Ok(feed) => feed,
@@ -271,7 +281,7 @@ fn run(
         }
 
         // Persist the feed (with updated cache headers) now that processing was successful
-        if access_mode == AccessMode::ReadWrite {
+        if settings.access_mode == AccessMode::ReadWrite {
             let tx = db.begin_write()?;
             db::save_feed(&tx, &feed)?;
             tx.commit()?;
