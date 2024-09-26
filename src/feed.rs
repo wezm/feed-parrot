@@ -77,7 +77,7 @@ impl ParsedFeed {
         }
     }
 
-    fn item_count(&self) -> usize {
+    pub fn item_count(&self) -> usize {
         match self {
             ParsedFeed::Rss(feed) => feed.items.len(),
             ParsedFeed::Atom(feed) => feed.entries.len(),

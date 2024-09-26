@@ -37,6 +37,7 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 struct FeedParrot<'a> {
     access_mode: AccessMode,
     cond_req: ConditionalRequest,
+    delay: Delay,
     services: &'a Services,
     feed_urls: &'a [Url],
 }
@@ -97,7 +98,7 @@ fn try_main() -> eyre::Result<()> {
         AccessMode::ReadWrite
     };
 
-    let wait = matches
+    let delay = matches
         .opt_get("w")?
         .unwrap_or_else(|| Delay::from_secs(60));
 
@@ -177,6 +178,7 @@ fn try_main() -> eyre::Result<()> {
         let settings = FeedParrot {
             access_mode,
             cond_req,
+            delay,
             services: &services,
             feed_urls: &urls,
         };
@@ -248,7 +250,13 @@ fn run(db: &Database, client: Client, settings: FeedParrot<'_>) -> eyre::Result<
                         if feed.had_initial_sync {
                             let client = client.clone();
                             let handle = scope.spawn(|| {
-                                announce_new_posts(db, client, network.as_ref(), &parsed_feed)
+                                announce_new_posts(
+                                    db,
+                                    client,
+                                    network.as_ref(),
+                                    &parsed_feed,
+                                    settings.delay,
+                                )
                             });
                             threads.push((feed_url, handle));
                         } else {
@@ -311,8 +319,10 @@ fn announce_new_posts(
     client: Client,
     network: &dyn SocialNetwork,
     feed: &ParsedFeed,
+    delay: Delay,
 ) -> eyre::Result<()> {
-    for item in feed.items() {
+    let item_count = feed.item_count();
+    for (i, item) in feed.items().enumerate() {
         // Determine if this item has been posted before
         if db::item_posted(db, network.service(), &item.guid)? {
             debug!("skip {}, already posted", item.guid);
@@ -354,24 +364,10 @@ fn announce_new_posts(
             }
         };
 
-        //     let post_id = post.id;
-        //     info!("New post to announce: [{}] {}", post_id, post.title);
-        //     let toot_result = db::post_categories(conn, &post, categories)
-        //         .map_err(|err| err.into())
-        //         .and_then(|post_categories| {
-        //             conn.transaction::<_, Box<dyn Error>, _>(|| {
-        //                 network.publish_post(&post, &post_categories)?;
-        //                 network.mark_post_published(conn, post)?;
-        //
-        //                 Ok(())
-        //             })
-        //         });
-        //
-        //     if let Err(err) = toot_result {
-        //         error!("Unable to announce post [{}]: {}", post_id, err);
-        //     }
-
-        // TODO: Wait delay period
+        if network.is_writeable() && (item_count - i) > 1 {
+            debug!("waiting before sending next post");
+            thread::sleep(delay.duration());
+        }
     }
 
     Ok(())

@@ -4,8 +4,10 @@
 // https://github.com/twitter/twitter-text/blob/30e2430d90cff3b46393ea54caf511441983c260/rb/lib/twitter-text/regex.rb
 
 use std::sync::LazyLock;
+use std::time::Instant;
 
 use fancy_regex::Regex;
+use log::debug;
 
 const MAX_DOMAIN_LENGTH: usize = 253;
 
@@ -78,7 +80,15 @@ static END_MENTION_MATCH: LazyLock<Regex> = LazyLock::new(|| {
 // 7. Replace instances of \/ with /
 // 8. Remove leading whitespace from first line and add (?ix) inside first paren
 const VALID_URL_RE: &str = include_str!("valid_url.regex");
-static VALID_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(&VALID_URL_RE).unwrap());
+static VALID_URL: LazyLock<Regex> = LazyLock::new(|| {
+    let start = Instant::now();
+    let re = Regex::new(&VALID_URL_RE).unwrap();
+    debug!(
+        "valid URL regex compiled in {}ms",
+        start.elapsed().as_millis()
+    );
+    re
+});
 
 pub(super) struct Mention<'a>(fancy_regex::Captures<'a>);
 
