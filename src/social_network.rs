@@ -13,7 +13,7 @@ pub enum AccessMode {
 }
 
 pub trait Registration {
-    fn register(&self, db: &Database, client: Client) -> eyre::Result<()>;
+    fn register(db: &Database, client: Client) -> eyre::Result<()>;
 }
 
 /// A potential post for sending

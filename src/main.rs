@@ -4,20 +4,20 @@ use std::io::{BufRead, BufReader};
 use std::process::ExitCode;
 use std::time::Duration;
 use std::{process, thread};
-use url::Url;
 
 use chrono::Utc;
 use env_logger;
 use env_logger::Env;
-use eyre::{bail, Context};
+use eyre::bail;
+use feed_parrot::db;
 use feed_parrot::feed::ParsedFeed;
 use feed_parrot::mastodon::models::MastodonState;
 use feed_parrot::models::{Service, Services};
-use feed_parrot::{db, mastodon};
 use getopts::Options;
 use log::{debug, error, info, warn};
 use redb::{Database, WriteTransaction};
 use reqwest::blocking::Client;
+use url::Url;
 
 use feed_parrot::crawler::ConditionalRequest;
 use feed_parrot::crawler::{self, FeedData};
@@ -74,7 +74,6 @@ fn try_main() -> eyre::Result<()> {
     let mut opts = Options::new();
     opts.optopt("d", "database", "path to database file", "FILE");
     opts.optflag("h", "help", "print this help information");
-    opts.optopt("i", "instance", "instance to register to", "URL");
     opts.optflag("n", "dryrun", "don't post statuses or update the db");
     opts.optflag("r", "register", "register with a service (requires -s)");
     opts.optmulti("s", "service", "filter action by service", "SERVICE");
@@ -142,11 +141,7 @@ fn try_main() -> eyre::Result<()> {
         if access_mode == AccessMode::ReadOnly {
             bail!("registration cannot be run in dry-run mode");
         }
-
-        let instance: Option<Url> = matches
-            .opt_get("i")
-            .wrap_err("unable to parse instance URL")?;
-        register(&db, client.clone(), instance, &services)
+        register(&db, client.clone(), &services)
     } else {
         let services = if services.is_empty() {
             Services::All
@@ -373,12 +368,7 @@ fn announce_new_posts(
     Ok(())
 }
 
-fn register(
-    db: &Database,
-    client: Client,
-    instance: Option<Url>,
-    services: &[Service],
-) -> eyre::Result<()> {
+fn register(db: &Database, client: Client, services: &[Service]) -> eyre::Result<()> {
     let service = match services {
         [service] => service,
         _ => {
@@ -391,13 +381,7 @@ fn register(
             // Twitter::register()?
             todo!()
         }
-        Service::Mastodon => {
-            let Some(instance) = instance else {
-                bail!("instance must be specified with -i to register with Mastodon")
-            };
-            let instance = mastodon::Instance(instance);
-            instance.register(db, client)
-        }
+        Service::Mastodon => Mastodon::register(db, client),
     }
 }
 
@@ -427,7 +411,7 @@ mod null_twitter {
     pub struct Twitter;
 
     impl Registration for Twitter {
-        fn register(&self, _db: &redb::Database, _client: Client) -> eyre::Result<()> {
+        fn register(_db: &redb::Database, _client: Client) -> eyre::Result<()> {
             bail!("Twitter support is not enabled")
         }
     }

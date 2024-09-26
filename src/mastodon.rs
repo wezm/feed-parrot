@@ -3,14 +3,14 @@ mod extractor;
 pub mod models;
 
 use std::borrow::Cow;
-use std::iter;
+use std::io::Write;
+use std::{io, iter};
 
-use eyre::eyre;
+use eyre::{eyre, Context};
 use models::MastodonState;
 use redb::Database;
 use reqwest::blocking::Client;
 use unicode_segmentation::UnicodeSegmentation;
-use url::Url;
 
 use crate::db::{self};
 use crate::feed::NewFeedItem;
@@ -27,17 +27,24 @@ const MAX_LEN: usize = 500;
 // All links are counted as 23 characters.
 const URL_LEN: usize = 23;
 
-// A Mastodon instance
-pub struct Instance(pub Url);
-
 pub struct Mastodon {
     pub access_mode: AccessMode,
     pub state: MastodonState,
 }
 
-impl Registration for Instance {
-    fn register(&self, db: &Database, client: Client) -> eyre::Result<()> {
-        let state = client::auth(client, self.0.clone())?;
+impl Registration for Mastodon {
+    fn register(db: &Database, client: Client) -> eyre::Result<()> {
+        print!("\nInstance URL: ");
+        io::stdout().flush()?;
+        let mut instance = String::new();
+        io::stdin().read_line(&mut instance)?;
+
+        let instance = instance
+            .trim()
+            .parse()
+            .wrap_err("unable to parse instance URL")?;
+
+        let state = client::auth(client, instance)?;
 
         // Persist the state
         db::save_service(db, Service::Mastodon, &state)?;
