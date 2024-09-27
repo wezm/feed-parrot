@@ -262,6 +262,10 @@ fn assemble_text(content: Option<&str>, link: Option<&str>, hashtags: Option<&st
     text
 }
 
+pub fn precompile_regex() {
+    let _ = extractor::VALID_URL.as_str();
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

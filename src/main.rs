@@ -9,10 +9,10 @@ use chrono::Utc;
 use env_logger;
 use env_logger::Env;
 use eyre::bail;
-use feed_parrot::db;
 use feed_parrot::feed::ParsedFeed;
 use feed_parrot::mastodon::models::MastodonState;
 use feed_parrot::models::{Service, Services};
+use feed_parrot::{db, mastodon};
 use getopts::Options;
 use log::{debug, error, info, warn};
 use redb::{Database, WriteTransaction};
@@ -187,6 +187,12 @@ fn print_usage(program: &str, opts: &Options) {
 }
 
 fn run(db: &Database, client: Client, settings: FeedParrot<'_>) -> eyre::Result<()> {
+    // This is a hack to compile the valid URL regex as early as possible
+    // because it's quite slow on low-powered devices like Raspberry Pi
+    // Zero. By kicking this off in a background thread it can happen in
+    // parallel with feed fetching.
+    thread::spawn(|| mastodon::precompile_regex());
+
     let services = db::load_services(db, settings.services)?
         .into_iter()
         .map(|service_data| {

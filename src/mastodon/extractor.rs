@@ -80,7 +80,7 @@ static END_MENTION_MATCH: LazyLock<Regex> = LazyLock::new(|| {
 // 7. Replace instances of \/ with /
 // 8. Remove leading whitespace from first line and add (?ix) inside first paren
 const VALID_URL_RE: &str = include_str!("valid_url.regex");
-static VALID_URL: LazyLock<Regex> = LazyLock::new(|| {
+pub(super) static VALID_URL: LazyLock<Regex> = LazyLock::new(|| {
     let start = Instant::now();
     let re = Regex::new(&VALID_URL_RE).unwrap();
     debug!(
