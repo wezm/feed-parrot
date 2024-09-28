@@ -322,29 +322,43 @@ fn announce_new_posts(
     feed: &ParsedFeed,
     delay: Delay,
 ) -> eyre::Result<()> {
-    let item_count = feed.item_count();
-    for (i, item) in feed.items().enumerate() {
+    let mut new_items = Vec::new();
+    for item in feed.items() {
         // Determine if this item has been posted before
         if db::item_posted(db, network.service(), &item.guid)? {
             debug!("skip {}, already posted", item.guid);
             continue;
         }
 
+        if item.is_future_post() {
+            debug!("skip future dated post {}", item.guid);
+            continue;
+        }
+
+        new_items.push(item);
+    }
+
+    // Sort new items so they are published oldest to newest
+    new_items.sort_by_key(|item| item.date_published);
+
+    // Publish them!
+    let mut item_iter = new_items.iter().peekable();
+    while let Some(item) = item_iter.next() {
         info!(
             "New post to announce: [{}] {}",
             item.guid,
             item.title.as_deref().unwrap_or("<empty>")
         );
 
-        let status = network.prepare_post(&item)?;
+        let status = network.prepare_post(item)?;
         let ready_post = match status.validate(&db, network.service()) {
             ValidationResult::Ok(ok) => ok,
-            ValidationResult::Duplicate(post) => {
-                warn!("post is a duplicate [{}]", item.guid);
+            ValidationResult::Duplicate(_post) => {
+                warn!("skipping duplicate post [{}]", item.guid);
                 continue;
             }
             ValidationResult::Error(err) => {
-                error!("Unable to publish post [{}]: {:?}", item.guid, err);
+                error!("unable to publish post [{}]: {:?}", item.guid, err);
                 continue;
             }
         };
@@ -365,7 +379,7 @@ fn announce_new_posts(
             }
         };
 
-        if network.is_writeable() && (item_count - i) > 1 {
+        if network.is_writeable() && item_iter.peek().is_some() {
             debug!("waiting before sending next post");
             thread::sleep(delay.duration());
         }

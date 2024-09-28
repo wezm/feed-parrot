@@ -39,6 +39,11 @@ impl NewFeedItem {
     pub fn guid(&self) -> PostGuid {
         PostGuid(self.guid.clone())
     }
+
+    pub fn is_future_post(&self) -> bool {
+        self.date_published
+            .map_or(false, |published| published > Utc::now())
+    }
 }
 
 impl From<atom::Entry> for NewFeedItem {
@@ -174,8 +179,6 @@ impl Iterator for ParsedFeedItemsIter<'_> {
         if self.index < self.feed.item_count() {
             let item = match self.feed {
                 ParsedFeed::Rss(feed) => {
-                    // FIXME: Reconsider this for feed parrot
-
                     // This hackery is to skip RSS items that lack a guid. Items without a guid
                     // don't allow us to know if the item is new or not... which is kinda important
                     // when sending notifications
