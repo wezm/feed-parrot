@@ -5,7 +5,6 @@ use std::io::{self, Cursor, Read};
 use atom_syndication as atom;
 use blake3::Hash;
 use chrono::{DateTime, Utc};
-// use lockable::LockPool;
 use mime::Mime;
 use reqwest::blocking::Client;
 use reqwest::header::{
@@ -48,28 +47,10 @@ enum ProcessError {
     Rss(rss::Error),
     Atom(atom::Error),
     Database(redb::Error),
-    // Request(reqwest::Error),
-    /// Feed response body exceeded the limit
-    // ResponseTooBig,
-    // ResponseUnsuccessful(StatusCode),
-    // The feed is in an unknown format
     Json(serde_json::Error),
+    // The feed is in an unknown format
     UnknownFormat,
-    // Database(sqlx::Error),
 }
-
-// pub struct Feed {
-//     pub title: String,
-//     pub url: String,
-//     pub etag: Option<String>,
-//     pub last_modified: Option<OffsetDateTime>,
-//     pub last_refresh_hash: Option<Vec<u8>>,
-//     pub source_slug: String,
-//     pub next_refresh_at: Option<OffsetDateTime>,
-//     pub refreshed_at: Option<OffsetDateTime>,
-//     pub created_at: OffsetDateTime,
-//     pub updated_at: OffsetDateTime,
-// }
 
 pub enum FeedData<T> {
     NotModified,
@@ -116,10 +97,7 @@ pub fn refresh_feed(
                 .and_then(|val| val.parse().ok());
             let data = to_utf8(data, &content_type)?;
 
-            // conn.transaction::<'_, _, _, ProcessError>(|conn| {
-            // let mut tx = conn.begin_write()?;
             let parsed_feed = {
-                // Box::pin(async move {
                 // Update the etag, last_modified, and content type on the feed. This is done inside the
                 // transaction so that if processing the feed fails we will fetch the feed
                 // with the old cache headers again next time. If new headers were used we
@@ -127,11 +105,7 @@ pub fn refresh_feed(
                 // failed to import initially.
                 update_feed_cache_keys(feed, &outcome.headers, Some(hash));
                 parse_feed(&data, &content_type)?
-                // })
-                // })
-                // .await?
             };
-            // tx.commit()?;
             FeedData::Updated(parsed_feed)
         }
     };
@@ -145,7 +119,7 @@ fn fetch_feed(
     cond_req: ConditionalRequest,
 ) -> Result<CrawlOutcome, FetchError> {
     // info!(url = feed.url);
-    // Build a request to fetch the feed, setting condititional request headers as appropriate
+    // Build a request to fetch the feed, setting conditional request headers as appropriate
     let mut headers = HeaderMap::new();
     if cond_req == ConditionalRequest::Enabled {
         let last_modified = feed
@@ -249,10 +223,6 @@ fn update_feed_cache_keys(feed: &mut Feed, headers: &HeaderMap, hash: Option<Has
 }
 
 fn parse_feed(
-    // db: &mut Database,
-    // _tx: &mut WriteTransaction,
-    // feed_id: FeedId,
-    // sync_type: SyncType,
     data: &str,
     // TODO: Use the content type to help drive the parse order
     content_type: &Option<Mime>,
@@ -286,147 +256,8 @@ fn parse_feed(
             })?
     };
 
-    // Process updates to the feed's title
-    // let feed = Feed::from_id(db, feed_id).await?;
-    // let title = parsed.title();
-    // if !title.is_empty() && feed.title != title {
-    //     Feed::update_title(db, feed_id, title).await?;
-    // }
-
-    // Process each entry, creating, or updating items as necessary
-    // debug!(count = parsed.item_count(), "process items");
-    // let now = OffsetDateTime::now_utc();
-    // for mut item in parsed.items() {
-    //     if FeedItem::exists(db, &item.guid).await? {
-    //         // TODO: Update existing record if needed
-    //         // Check date_updated and potentially compare the content to see if the item
-    //         // should be updated
-    //         // debug!(guid = item.guid, "Skipping existing item");
-    //         continue;
-    //     }
-
-    //     // Create new item
-    //     // info!(guid = item.guid, "create new item");
-    //     if sync_type == SyncType::Initial {
-    //         // When doing an initial sync all newly created feed items are marked as already
-    //         // notified so that only items that are received after the initial sync may trigger
-    //         // notifications to users.
-    //         item.notified_at = Some(now);
-    //     }
-    //     FeedItem::create(db, feed_id, item).await?;
-    // }
-
     Ok(parsed)
 }
-
-// async fn listen_for_notifications(
-//     client: reqwest::Client,
-//     pool: PgPool,
-//     lock_pool: Arc<LockPool<FeedId>>,
-//     mut listener: PgListener,
-//     shutdown: Arc<AtomicBool>,
-// ) -> Result<(), sqlx::Error> {
-//     // let backoff = tokio::time::Duration::from_secs(0);
-//     let (send, mut recv) = tokio::sync::mpsc::channel::<()>(1);
-//     'quit: loop {
-//         // start handling notifications, connecting if needed
-//         while let Some(notification) = listener.try_recv().await? {
-//             match notification.channel() {
-//                 "bellbird.subscription" => {
-//                     let payload = notification.payload();
-//                     info!(feed_id = payload, "new subscription");
-//                     let feed_id = match payload.parse::<i64>().map(FeedId::from) {
-//                         Ok(id) => id,
-//                         Err(err) => {
-//                             // error!(%err, "invalid subscription payload");
-//                             continue;
-//                         }
-//                     };
-//
-//                     tokio::spawn(handle_subscription_notification(
-//                         client.clone(),
-//                         pool.clone(),
-//                         Arc::clone(&lock_pool),
-//                         feed_id,
-//                         send.clone(),
-//                     ));
-//                 }
-//                 "bellbird.shutdown" => {
-//                     info!("received shutdown notification");
-//                     listener.unlisten_all().await?;
-//
-//                     // Wait for tasks to finish
-//                     //
-//                     // We drop our sender first because the recv() call otherwise
-//                     // sleeps forever.
-//                     drop(send);
-//
-//                     // When every sender has gone out of scope, the recv call
-//                     // will return with an error. We ignore the error.
-//                     info!("waiting for pending tasks");
-//                     let _ = recv.recv().await;
-//
-//                     info!("exiting");
-//                     shutdown.store(true, Ordering::SeqCst);
-//                     break 'quit;
-//                 }
-//                 _ => {}
-//             }
-//         }
-//
-//         // connection lost, wait before retrying
-//         // tokio::time::sleep(Duration::from_secs(2))
-//     }
-//
-//     Ok(())
-// }
-
-// async fn handle_subscription_notification(
-//     client: reqwest::Client,
-//     pool: PgPool,
-//     lock_pool: Arc<LockPool<FeedId>>,
-//     feed_id: FeedId,
-//     _sender: Sender<()>,
-// ) -> Result<(), CrawlError> {
-//     let _lock = match lock_pool.try_lock(feed_id) {
-//         Some(lock) => lock,
-//         None => {
-//             info!("refresh already in progress");
-//             return Ok(());
-//         }
-//     };
-//
-//     // If this feed has next_refresh_at of NULL then perform initial sync
-//     let mut db = pool
-//         .acquire()
-//         .await
-//         .map_err(|err| CrawlError::Fetch(FetchError::Database(err)))?;
-//     // TODO: Avoid fetching entire Feed
-//     let feed = Feed::from_id(&mut db, feed_id)
-//         .await
-//         .map_err(|err| CrawlError::Fetch(FetchError::Database(err)))?;
-//     if feed.next_refresh_at.is_none() {
-//         // Do an initial sync of this feed
-//         refresh_and_schedule_next(client, &mut db, SyncType::Initial, feed_id).await?;
-//     }
-//     Ok(())
-// }
-
-// async fn initial_sync_check(db: &mut Database) -> Result<(), CrawlError> {
-//     info!("checking for missed initial syncs");
-//     let feeds = Feed::for_initial_sync(db).await?;
-//     for feed_id in feeds {
-//         info!(%feed_id, "notifying");
-//         sqlx::query!(
-//             r#"SELECT pg_notify('bellbird.subscription', CAST($1 AS text))"#,
-//             i64::from(feed_id) as _
-//         )
-//             .execute(&mut *db)
-//             .await?;
-//     }
-//
-//     Ok(())
-// }
 
 fn to_utf8(text: Vec<u8>, content_type: &Option<Mime>) -> Result<String, FetchError> {
     // Does the content type tell us anything about the encoding?
