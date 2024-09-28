@@ -1,5 +1,8 @@
+use std::str::FromStr;
+
 use atom_syndication as atom;
 use chrono::{DateTime, ParseResult, Utc};
+use mime::Mime;
 use rss::Channel;
 
 use crate::json_feed::{self, JsonFeed};
@@ -45,7 +48,7 @@ impl From<atom::Entry> for NewFeedItem {
         let author = join_to_string::join(entry.authors.into_iter().map(|person| person.name))
             .separator(",")
             .to_string();
-        let url = entry.links.first().map(|link| link.href.to_owned()); // FIXME: Better way to select link that filters on rel and mime type
+        let url = choose_atom_link(&entry.links);
         NewFeedItem {
             guid: entry.id,
             url,
@@ -62,6 +65,65 @@ impl From<atom::Entry> for NewFeedItem {
             date_modified: Some(entry.updated.to_utc()),
         }
     }
+}
+
+fn choose_atom_link(links: &[atom::Link]) -> Option<String> {
+    // atom:link elements MAY have a "rel" attribute that indicates the link
+    // relation type.  If the "rel" attribute is not present, the link
+    // element MUST be interpreted as if the link relation type is
+    // "alternate".
+    //
+    // The value "alternate" signifies that the IRI in the value of the
+    // href attribute identifies an alternate version of the resource
+    // described by the containing element.
+    //
+    // On the link element, the "type" attribute's value is an advisory
+    // media type: it is a hint about the type of the representation that is
+    // expected to be returned when the value of the href attribute is
+    // dereferenced.
+    //
+    // https://datatracker.ietf.org/doc/html/rfc4287#section-4.2.7.2
+
+    // For the most part we would post the alternate link with text/html media type
+    // However Daring Fireball for example sets the alternate link to the
+    // linked item and related link to the DF page. This seems backwards. The
+    // alternate link is the DF one and the related one is the link that the
+    // post is talking about.
+    //
+    // It's likely this is done for the widest RSS reader support. The
+    // snag for the purposes of a tool like this though is that we'd
+    // probably want to post the related link in this case like the
+    // DF Tooter does. This seems pretty rare though so for now I'll
+    // stick with the alternate link.
+    //
+    // It's als worth noting that DF's JSON feed uses the url and external_url
+    // fields as intended so that would be an option if subscribing to the
+    // DF feed was desired.
+
+    for link in links {
+        // atom_syndication defaults rel to alternate
+        if link.rel != "alternate" {
+            continue;
+        }
+
+        let Ok(mime_type) = link
+            .mime_type
+            .as_ref()
+            .map(|s| Mime::from_str(s))
+            .transpose()
+        else {
+            // Failed to parse media type:
+            // Link elements MAY have a type attribute, whose value MUST conform to the syntax of a MIME media type.
+            continue;
+        };
+        if link.mime_type.is_none()
+            || mime_type.as_ref().map(|mime| mime.essence_str()) == Some("text/html")
+        {
+            return Some(link.href.clone());
+        }
+    }
+
+    None
 }
 
 pub struct ParsedFeedItemsIter<'feed> {
@@ -199,4 +261,69 @@ impl From<json_feed::Item> for NewFeedItem {
 fn parse_rfc2822(s: &str) -> ParseResult<DateTime<Utc>> {
     let date = DateTime::parse_from_rfc2822(s)?;
     Ok(date.to_utc())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn choose_atom_link_no_attrs() {
+        let links = &[atom::Link {
+            href: "https://www.example.com".to_string(),
+            ..Default::default()
+        }];
+        assert_eq!(choose_atom_link(links).unwrap(), "https://www.example.com");
+    }
+
+    #[test]
+    fn choose_atom_link_type() {
+        let links = &[atom::Link {
+            href: "https://www.example.com".to_string(),
+            mime_type: Some("text/html; charset=utf-8".to_string()),
+            ..Default::default()
+        }];
+        assert_eq!(choose_atom_link(links).unwrap(), "https://www.example.com");
+    }
+
+    #[test]
+    fn choose_atom_link_multiple() {
+        let links = &[
+            atom::Link {
+                href: "https://www.example.com/related".to_string(),
+                rel: "related".to_string(),
+                ..Default::default()
+            },
+            atom::Link {
+                href: "https://www.example.com/feed".to_string(),
+                rel: "alternate".to_string(),
+                mime_type: Some("application/atom+xml".to_string()),
+                ..Default::default()
+            },
+            atom::Link {
+                href: "https://www.example.com".to_string(),
+                mime_type: Some("text/html; charset=utf-8".to_string()),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(choose_atom_link(links).unwrap(), "https://www.example.com");
+    }
+
+    #[test]
+    fn choose_atom_link_unviable() {
+        let links = &[
+            atom::Link {
+                href: "https://www.example.com/related".to_string(),
+                rel: "related".to_string(),
+                ..Default::default()
+            },
+            atom::Link {
+                href: "https://www.example.com/feed".to_string(),
+                rel: "alternate".to_string(),
+                mime_type: Some("application/atom+xml".to_string()),
+                ..Default::default()
+            },
+        ];
+        assert_eq!(choose_atom_link(links), None);
+    }
 }
