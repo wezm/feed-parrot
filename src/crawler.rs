@@ -75,6 +75,12 @@ struct CrawlOutcome {
     headers: HeaderMap,
 }
 
+#[derive(Copy, Clone)]
+enum FeedType {
+    Atom,
+    Rss,
+}
+
 pub fn refresh_feed(
     client: Client,
     cond_req: ConditionalRequest,
@@ -98,11 +104,7 @@ pub fn refresh_feed(
             let data = to_utf8(data, &content_type)?;
 
             let parsed_feed = {
-                // Update the etag, last_modified, and content type on the feed. This is done inside the
-                // transaction so that if processing the feed fails we will fetch the feed
-                // with the old cache headers again next time. If new headers were used we
-                // would potentially get a 304 response and not process any of the items that
-                // failed to import initially.
+                // Update the etag, last_modified, and content type on the feed.
                 update_feed_cache_keys(feed, &outcome.headers, Some(hash));
                 parse_feed(&data, &content_type)?
             };
@@ -222,41 +224,59 @@ fn update_feed_cache_keys(feed: &mut Feed, headers: &HeaderMap, hash: Option<Has
     feed.last_refresh_hash = hash.map(|h| *h.as_bytes());
 }
 
-fn parse_feed(
-    data: &str,
-    // TODO: Use the content type to help drive the parse order
-    content_type: &Option<Mime>,
-) -> Result<ParsedFeed, ProcessError> {
-    // Parse the data
-    let parsed = if data.trim_start().starts_with('{') {
+fn parse_feed(data: &str, content_type: &Option<Mime>) -> Result<ParsedFeed, ProcessError> {
+    // Parse the data. JSON Feed has to start with {
+    if data.trim_start().starts_with('{') {
         // JSON
         debug!("detected JSON format");
-        serde_json::from_str(data).map(ParsedFeed::Json)?
-    } else {
-        // Try to parse as RSS, if that fails, try Atom
-        Channel::read_from(data.as_bytes())
-            .map(|rss| {
-                debug!("parsed as RSS");
-                ParsedFeed::Rss(rss)
-            })
-            .or_else(|err| {
-                match err {
-                    rss::Error::InvalidStartTag => {
-                        atom::Feed::read_from(data.as_bytes()).map_err(|err| match err {
-                            atom::Error::InvalidStartTag => ProcessError::UnknownFormat,
-                            _ => ProcessError::Atom(err),
-                        })
-                    }
-                    _ => Err(err.into()),
-                }
-                .map(|feed| {
-                    debug!("parsed as Atom");
-                    ParsedFeed::Atom(feed)
-                })
-            })?
+        return serde_json::from_str(data)
+            .map(ParsedFeed::Json)
+            .map_err(ProcessError::Json);
+    }
+
+    // Parse as one of the XML formats
+    let media_type = content_type.as_ref().map(|media| media.essence_str());
+    let parse_order = match media_type {
+        Some("application/atom+xml") => [FeedType::Atom, FeedType::Rss],
+        // application/rss+xml | text/xml | None => try RSS first
+        _ => [FeedType::Rss, FeedType::Atom],
     };
 
-    Ok(parsed)
+    let mut type_iter = parse_order.iter().copied().peekable();
+    while let Some(feed_type) = type_iter.next() {
+        match feed_type {
+            FeedType::Atom => {
+                match atom::Feed::read_from(data.as_bytes()) {
+                    Ok(feed) => {
+                        debug!("parsed as Atom");
+                        return Ok(ParsedFeed::Atom(feed));
+                    }
+                    // Unable to parse and no more feed types to try
+                    Err(atom::Error::InvalidStartTag) if type_iter.peek().is_none() => {}
+                    // Not Atom, other types to try
+                    Err(atom::Error::InvalidStartTag) => continue,
+                    // Invalid
+                    Err(err) => return Err(ProcessError::Atom(err)),
+                }
+            }
+            FeedType::Rss => {
+                match Channel::read_from(data.as_bytes()) {
+                    Ok(feed) => {
+                        debug!("parsed as RSS");
+                        return Ok(ParsedFeed::Rss(feed));
+                    }
+                    // Unable to parse and no more feed types to try
+                    Err(rss::Error::InvalidStartTag) if type_iter.peek().is_none() => {}
+                    // Not RSS, other types to try
+                    Err(rss::Error::InvalidStartTag) => continue,
+                    // Invalid
+                    Err(err) => return Err(ProcessError::Rss(err)),
+                }
+            }
+        }
+    }
+
+    Err(ProcessError::UnknownFormat)
 }
 
 fn to_utf8(text: Vec<u8>, content_type: &Option<Mime>) -> Result<String, FetchError> {
