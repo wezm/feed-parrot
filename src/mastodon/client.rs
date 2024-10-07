@@ -121,15 +121,19 @@ pub fn post_status(
     client: &Client,
     state: &MastodonState,
     status: &NewStatus,
+    idempotency_key: &str,
 ) -> eyre::Result<super::models::Status> {
     let url = state.instance.join("/api/v1/statuses")?;
     let bearer_token = format!("Bearer {}", state.access_token);
-    let idempotency_key = "TODO";
 
     let resp = client
         .post(url.clone())
         .header(AUTHORIZATION, &bearer_token)
         .header(ACCEPT, APPLICATION_JSON.essence_str())
+        // Provide this header with any arbitrary string to prevent duplicate submissions of the
+        // same status. Consider using a hash or UUID generated client-side. Idempotency keys are
+        // stored for up to 1 hour.
+        .header("Idempotency-Key", idempotency_key)
         .json(status)
         .send()?;
     let xstatus: super::models::Status = json_or_error(resp)?;

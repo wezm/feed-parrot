@@ -24,7 +24,6 @@ pub struct ReadyPost {
     text: String,
     guid: PostGuid,
     hash: blake3::Hash,
-    // TODO: sort out something for idempotency key
 }
 
 /// A post that has been posted
@@ -64,6 +63,10 @@ impl ReadyPost {
 
     pub(crate) fn into_text(self) -> String {
         self.text
+    }
+
+    pub(crate) fn hash(&self) -> blake3::Hash {
+        self.hash
     }
 }
 

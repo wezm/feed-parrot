@@ -89,7 +89,9 @@ impl SocialNetwork for Mastodon {
                 language: None,
             };
 
-            let _status = client::post_status(http, &self.state, &status)?;
+            let idempotency_key = post.hash().to_hex();
+            let _status =
+                client::post_status(http, &self.state, &status, idempotency_key.as_str())?;
         }
         Ok(Posted::from(post))
     }
