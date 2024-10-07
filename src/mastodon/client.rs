@@ -168,6 +168,13 @@ fn json_or_error<T: DeserializeOwned>(response: Response) -> eyre::Result<T> {
         // TODO: Distinguish 4xx and 5xx responses
         let err: ErrorResponse = serde_json::from_str(&body)
             .wrap_err_with(|| format!("unable to parse error response: {body}"))?;
-        Err(eyre!(err.error_description.unwrap_or(err.error)))
+        let msg = join_to_string::join(
+            [Some(err.error.as_str()), err.error_description.as_deref()]
+                .into_iter()
+                .flatten(),
+        )
+        .separator(": ")
+        .to_string();
+        Err(eyre!(msg))
     }
 }
