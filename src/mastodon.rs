@@ -85,7 +85,7 @@ impl SocialNetwork for Mastodon {
                 in_reply_to_id: None,
                 sensitive: false,
                 spoiler_text: None,
-                visibility: Visibility::Public,
+                visibility: Visibility::Unlisted,
                 language: None,
             };
 
