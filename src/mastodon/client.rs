@@ -4,6 +4,7 @@ use std::io::Write;
 
 use eyre::{eyre, Context};
 use log::{debug, error};
+use mime::APPLICATION_JSON;
 use reqwest::blocking::{Client, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION};
 use serde::de::DeserializeOwned;
@@ -49,6 +50,7 @@ pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
     let url = instance.join("/api/v1/apps")?;
     let resp = client
         .post(url)
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
         .form(&[
             ("client_name", "Feed Parrot"),
             ("redirect_uris", REDIRECT_URI),
@@ -91,6 +93,7 @@ pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
     let url = instance.join("/oauth/token")?;
     let resp = client
         .post(url)
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", code),
@@ -126,6 +129,7 @@ pub fn post_status(
     let resp = client
         .post(url.clone())
         .header(AUTHORIZATION, &bearer_token)
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
         .json(status)
         .send()?;
     let xstatus: super::models::Status = json_or_error(resp)?;
@@ -142,7 +146,7 @@ pub fn verify_credentials(
     let resp = client
         .get(url.clone())
         .header(AUTHORIZATION, &bearer_token)
-        .header(ACCEPT, "application/json")
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
         .send()?;
     let account: super::models::CredentialAccount = json_or_error(resp)?;
     Ok(account)
