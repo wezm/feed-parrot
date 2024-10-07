@@ -94,6 +94,35 @@ pub struct Account {
     pub acct: String,
 }
 
+/// Account record returned from `verify_credentials`.
+///
+/// https://docs.joinmastodon.org/entities/Account/#CredentialAccount
+#[allow(unused)]
+#[derive(Deserialize)]
+pub struct CredentialAccount {
+    pub id: String,
+    pub username: String,
+    pub acct: String,
+    pub display_name: String,
+    pub locked: bool,
+    #[serde(default)]
+    pub bot: bool,
+    pub created_at: String,
+    pub note: String,
+    pub url: String,
+    pub avatar: String,
+    pub avatar_static: String,
+    pub header: String,
+    pub header_static: String,
+    pub followers_count: i64,
+    pub following_count: i64,
+    pub statuses_count: i64,
+    pub last_status_at: Option<String>,
+    // pub(crate) source: Source,
+    // pub(crate) emojis: Vec<Emoji>,
+    // pub(crate) fields: Vec<Field>,
+}
+
 impl Status {
     pub fn content(&self) -> &str {
         self.reblog

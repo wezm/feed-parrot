@@ -2,10 +2,10 @@ use std::collections::HashMap;
 use std::io;
 use std::io::Write;
 
-use eyre::eyre;
+use eyre::{eyre, Context};
 use log::{debug, error};
 use reqwest::blocking::{Client, Response};
-use reqwest::header::AUTHORIZATION;
+use reqwest::header::{ACCEPT, AUTHORIZATION};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use simple_eyre::eyre;
@@ -13,13 +13,13 @@ use url::Url;
 
 use crate::mastodon::models::{MastodonState, NewStatus};
 
-const SCOPES: &str = "write:statuses";
+const SCOPES: &str = "write:statuses read:accounts";
 const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
 
 #[derive(Deserialize)]
 struct ErrorResponse {
-    // error: String,
-    error_description: String,
+    error: String,
+    error_description: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -132,14 +132,34 @@ pub fn post_status(
     Ok(xstatus)
 }
 
+pub fn verify_credentials(
+    client: &Client,
+    state: &MastodonState,
+) -> eyre::Result<super::models::CredentialAccount> {
+    let url = state.instance.join("/api/v1/accounts/verify_credentials")?;
+    let bearer_token = format!("Bearer {}", state.access_token);
+
+    let resp = client
+        .get(url.clone())
+        .header(AUTHORIZATION, &bearer_token)
+        .header(ACCEPT, "application/json")
+        .send()?;
+    let account: super::models::CredentialAccount = json_or_error(resp)?;
+    Ok(account)
+}
+
 fn json_or_error<T: DeserializeOwned>(response: Response) -> eyre::Result<T> {
-    if response.status().is_success() {
-        let app = response.json()?;
-        Ok(app)
+    let status = response.status();
+    let body = response.text()?;
+    if status.is_success() {
+        let decoded = serde_json::from_str(&body)
+            .wrap_err_with(|| format!("unable to parse response: {body}"))?;
+        Ok(decoded)
     } else {
-        error!("Request was unsuccessful ({})", response.status().as_u16());
+        error!("Request was unsuccessful ({})", status.as_u16());
         // TODO: Distinguish 4xx and 5xx responses
-        let err: ErrorResponse = response.json()?;
-        Err(eyre!(err.error_description))
+        let err: ErrorResponse = serde_json::from_str(&body)
+            .wrap_err_with(|| format!("unable to parse error response: {body}"))?;
+        Err(eyre!(err.error_description.unwrap_or(err.error)))
     }
 }

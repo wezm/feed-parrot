@@ -9,7 +9,7 @@ use std::{io, iter};
 use eyre::{eyre, Context};
 use models::MastodonState;
 use redb::Database;
-use reqwest::blocking::Client;
+use reqwest::blocking::Client as HttpClient;
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::db::{self};
@@ -32,8 +32,14 @@ pub struct Mastodon {
     pub state: MastodonState,
 }
 
+impl Mastodon {
+    pub fn verify_credentials(&self, http: &HttpClient) -> eyre::Result<models::CredentialAccount> {
+        client::verify_credentials(http, &self.state)
+    }
+}
+
 impl Registration for Mastodon {
-    fn register(db: &Database, client: Client) -> eyre::Result<()> {
+    fn register(db: &Database, http: HttpClient) -> eyre::Result<()> {
         print!("\nInstance URL: ");
         io::stdout().flush()?;
         let mut instance = String::new();
@@ -44,7 +50,7 @@ impl Registration for Mastodon {
             .parse()
             .wrap_err("unable to parse instance URL")?;
 
-        let state = client::auth(client, instance)?;
+        let state = client::auth(http, instance)?;
 
         // Persist the state
         db::save_service(db, Service::Mastodon, &state)?;
@@ -69,7 +75,7 @@ impl SocialNetwork for Mastodon {
         Ok(PotentialPost(text, item.guid()))
     }
 
-    fn publish_post(&self, client: &Client, post: ReadyPost) -> eyre::Result<Posted> {
+    fn publish_post(&self, http: &HttpClient, post: ReadyPost) -> eyre::Result<Posted> {
         info!("Post: {}", post.text());
 
         if self.is_writeable() {
@@ -83,7 +89,7 @@ impl SocialNetwork for Mastodon {
                 language: None,
             };
 
-            let _status = client::post_status(client, &self.state, &status)?;
+            let _status = client::post_status(http, &self.state, &status)?;
         }
         Ok(Posted::from(post))
     }

@@ -125,16 +125,16 @@ fn try_main() -> eyre::Result<()> {
 
     let db = db::establish_connection(&db_path)?;
 
-    if let Some(type_) = matches.opt_str("l") {
-        return list_items(&db, &type_);
-    }
-
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(TIMEOUT)
         // .read_timeout(TIMEOUT)
         .timeout(Duration::from_secs(2 * 60))
         .user_agent(format!("Feed Parrot/{}", env!("CARGO_PKG_VERSION")))
         .build()?;
+
+    if let Some(type_) = matches.opt_str("l") {
+        return list_items(&db, client.clone(), &type_);
+    }
 
     let services = matches
         .opt_strs("s")
@@ -191,10 +191,10 @@ fn print_usage(program: &str, opts: &Options) {
     eprint!("{}", opts.usage(&brief));
 }
 
-fn list_items(db: &Database, type_: &str) -> eyre::Result<()> {
+fn list_items(db: &Database, client: Client, type_: &str) -> eyre::Result<()> {
     match type_ {
         "feeds" => list_feeds(db),
-        "services" => list_services(db),
+        "services" => list_services(db, &client),
         _ => Err(eyre!(
             "unknown item type: {type_}. Valid types: feeds, services"
         )),
@@ -207,14 +207,23 @@ fn list_feeds(db: &Database) -> eyre::Result<()> {
     Ok(())
 }
 
-fn list_services(db: &Database) -> eyre::Result<()> {
+fn list_services(db: &Database, client: &Client) -> eyre::Result<()> {
     let services = db::load_services(db, &Services::All)?;
     for service_data in services.iter() {
         match service_data.service {
             Service::Mastodon => {
                 let state: MastodonState = rmp_serde::from_slice(&service_data.data)?;
-                // TODO: It would be better to show the account like: @user@example.com
-                println!("{}: {}", service_data.service, state.instance);
+                let instance = state.instance.clone();
+                let mastodon = Mastodon {
+                    access_mode: AccessMode::ReadOnly,
+                    state,
+                };
+                let account = mastodon.verify_credentials(client)?;
+
+                println!(
+                    "{}: @{} on {}",
+                    service_data.service, account.username, instance
+                );
             }
             Service::Twitter => todo!(),
         }
