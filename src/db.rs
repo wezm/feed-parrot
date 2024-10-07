@@ -95,6 +95,23 @@ pub fn load_feed(db: &Database, feed_url: &Url) -> Result<Feed, redb::Error> {
     Ok(feed)
 }
 
+pub fn load_feeds(db: &Database) -> eyre::Result<Vec<Feed>> {
+    let read_txn = db.begin_read()?;
+    let table = match read_txn.open_table(FEED_TABLE) {
+        Ok(table) => table,
+        Err(TableError::TableDoesNotExist(_)) => return Ok(Vec::new()),
+        Err(e) => return Err(e.into()),
+    };
+
+    table
+        .iter()?
+        .map(|item| {
+            let (_url, data) = item?;
+            rmp_serde::from_slice::<Feed>(data.value()).map_err(eyre::Report::from)
+        })
+        .collect::<Result<Vec<_>, eyre::Report>>()
+}
+
 pub fn load_services(db: &Database, services: &Services) -> eyre::Result<Vec<ServiceData>> {
     let read_txn = db.begin_read()?;
     let table = match read_txn.open_table(SERVICE_TABLE) {

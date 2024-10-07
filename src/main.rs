@@ -8,7 +8,7 @@ use std::{process, thread};
 use chrono::Utc;
 use env_logger;
 use env_logger::Env;
-use eyre::bail;
+use eyre::{bail, eyre};
 use feed_parrot::feed::ParsedFeed;
 use feed_parrot::mastodon::models::MastodonState;
 use feed_parrot::models::{Service, Services};
@@ -74,6 +74,7 @@ fn try_main() -> eyre::Result<()> {
     let mut opts = Options::new();
     opts.optopt("d", "database", "path to database file", "FILE");
     opts.optflag("h", "help", "print this help information");
+    opts.optopt("l", "list", "list items in db", "TYPE");
     opts.optflag("n", "dryrun", "don't post statuses or update the db");
     opts.optflag("r", "register", "register with a service (requires -s)");
     opts.optmulti("s", "service", "filter action by service", "SERVICE");
@@ -123,6 +124,10 @@ fn try_main() -> eyre::Result<()> {
     };
 
     let db = db::establish_connection(&db_path)?;
+
+    if let Some(type_) = matches.opt_str("l") {
+        return list_items(&db, &type_);
+    }
 
     let client = reqwest::blocking::Client::builder()
         .connect_timeout(TIMEOUT)
@@ -184,6 +189,37 @@ fn try_main() -> eyre::Result<()> {
 fn print_usage(program: &str, opts: &Options) {
     let brief = format!("Usage: {} [options] URL", program);
     eprint!("{}", opts.usage(&brief));
+}
+
+fn list_items(db: &Database, type_: &str) -> eyre::Result<()> {
+    match type_ {
+        "feeds" => list_feeds(db),
+        "services" => list_services(db),
+        _ => Err(eyre!(
+            "unknown item type: {type_}. Valid types: feeds, services"
+        )),
+    }
+}
+
+fn list_feeds(db: &Database) -> eyre::Result<()> {
+    let feeds = db::load_feeds(db)?;
+    feeds.iter().for_each(|feed| println!("{}", feed.url));
+    Ok(())
+}
+
+fn list_services(db: &Database) -> eyre::Result<()> {
+    let services = db::load_services(db, &Services::All)?;
+    for service_data in services.iter() {
+        match service_data.service {
+            Service::Mastodon => {
+                let state: MastodonState = rmp_serde::from_slice(&service_data.data)?;
+                // TODO: It would be better to show the account like: @user@example.com
+                println!("{}: {}", service_data.service, state.instance);
+            }
+            Service::Twitter => todo!(),
+        }
+    }
+    Ok(())
 }
 
 fn run(db: &Database, client: Client, settings: FeedParrot<'_>) -> eyre::Result<()> {
