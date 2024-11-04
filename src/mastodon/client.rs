@@ -16,7 +16,6 @@ use crate::mastodon::models::{MastodonState, NewStatus};
 
 use super::models::NewMedia;
 
-const SCOPES: &str = "write:statuses write:media read:accounts";
 const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
 
 #[derive(Deserialize)]
@@ -46,8 +45,39 @@ struct Status {
     extra: HashMap<String, serde_json::Value>,
 }
 
+#[derive(Deserialize)]
+struct OAuthServerConfiguration {
+    scopes_supported: Vec<String>,
+}
+
 /// Perform the OAuth flow to obtain credentials
 pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
+    // The profile scope is only available on Mastodon 4.3 onwards. 4.3
+    // also added an endpoint that allows checking what scopes are supported
+    // so we can use this to determine whether to use `profile` or `read:accounts`.
+    let mut scopes: [&str; 3] = ["write:statuses", "write:media", "read:accounts"];
+    let url = instance.join("/.well-known/oauth-authorization-server")?;
+    let resp = client
+        .get(url)
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
+        .send()?;
+    if resp.status().is_success() {
+        debug!("/.well-known/oauth-authorization-server success");
+        let body = resp.text()?;
+        if let Ok(oauth_config) = serde_json::from_str::<'_, OAuthServerConfiguration>(&body) {
+            debug!("supported scopes: {:?}", oauth_config.scopes_supported);
+            let has_profile = oauth_config
+                .scopes_supported
+                .iter()
+                .find(|scope| scope.as_str() == "profile")
+                .is_some();
+            if has_profile {
+                scopes[2] = "profile";
+            }
+        };
+    }
+    let scopes = scopes.join(" ");
+
     // Register application to obtain client id and secret
     let url = instance.join("/api/v1/apps")?;
     let resp = client
@@ -56,7 +86,7 @@ pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
         .form(&[
             ("client_name", "Feed Parrot"),
             ("redirect_uris", REDIRECT_URI),
-            ("scopes", SCOPES),
+            ("scopes", scopes.as_str()),
             ("website", "https://feedparrot.com/"),
         ])
         .send()?; // TODO: Add context info to error
@@ -76,7 +106,7 @@ pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
         .append_pair("response_type", "code")
         .append_pair("client_id", &client_id)
         .append_pair("redirect_uri", REDIRECT_URI)
-        .append_pair("scope", SCOPES);
+        .append_pair("scope", scopes.as_str());
     println!(
         "\nOpen this page in your browser and paste the code:\n{}",
         url
@@ -102,7 +132,7 @@ pub fn auth(client: Client, instance: Url) -> eyre::Result<MastodonState> {
             ("client_id", client_id.as_str()),
             ("client_secret", &client_secret),
             ("redirect_uri", REDIRECT_URI),
-            ("scope", SCOPES),
+            ("scope", scopes.as_str()),
         ])
         .send()?; // TODO: Add context info to error
     let token_resp: TokenResponse = json_or_error(resp)?;
