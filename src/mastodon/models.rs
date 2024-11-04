@@ -1,10 +1,12 @@
-use std::fmt;
+use std::fmt::{self, format};
 
 use chrono::{DateTime, Utc};
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::str::FromStr;
 use url::Url;
+
+use crate::ErrorMessage;
 
 #[derive(Serialize, Deserialize)]
 pub struct MastodonState {
@@ -14,7 +16,7 @@ pub struct MastodonState {
     pub(crate) access_token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Clone, Copy)]
 #[serde(rename_all = "snake_case")]
 pub enum Visibility {
     Public,
@@ -205,5 +207,30 @@ mod rfc3339 {
         }
 
         deserializer.deserialize_str(Rfc3339Visitor)
+    }
+}
+
+impl FromStr for Visibility {
+    type Err = ErrorMessage;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "public" => Ok(Visibility::Public),
+            "unlisted" => Ok(Visibility::Unlisted),
+            "private" => Ok(Visibility::Private),
+            "direct" => Ok(Visibility::Direct),
+            otherwise => {
+                let valid_options = serde_json::to_string(&[
+                    Visibility::Public,
+                    Visibility::Unlisted,
+                    Visibility::Private,
+                    Visibility::Direct,
+                ])
+                .unwrap();
+                Err(ErrorMessage(format!(
+                    "'{otherwise}' is not a valid visibility. Valid options: {valid_options}"
+                )))
+            }
+        }
     }
 }

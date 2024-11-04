@@ -29,6 +29,7 @@ const URL_LEN: usize = 23;
 
 pub struct Mastodon {
     pub access_mode: AccessMode,
+    pub post_visibility: Visibility,
     pub state: MastodonState,
 }
 
@@ -85,7 +86,7 @@ impl SocialNetwork for Mastodon {
                 in_reply_to_id: None,
                 sensitive: false,
                 spoiler_text: None,
-                visibility: Visibility::Unlisted,
+                visibility: self.post_visibility,
                 language: None,
             };
 

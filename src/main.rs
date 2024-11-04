@@ -10,7 +10,7 @@ use env_logger;
 use env_logger::Env;
 use eyre::{bail, eyre};
 use feed_parrot::feed::ParsedFeed;
-use feed_parrot::mastodon::models::MastodonState;
+use feed_parrot::mastodon::models::{MastodonState, Visibility};
 use feed_parrot::models::{Service, Services};
 use feed_parrot::{db, mastodon};
 use getopts::Options;
@@ -38,6 +38,7 @@ struct FeedParrot<'a> {
     access_mode: AccessMode,
     cond_req: ConditionalRequest,
     delay: Delay,
+    post_visibility: Visibility,
     services: &'a Services,
     feed_urls: &'a [Url],
 }
@@ -79,6 +80,12 @@ fn try_main() -> eyre::Result<()> {
     opts.optflag("r", "register", "register with a service (requires -s)");
     opts.optmulti("s", "service", "filter action by service", "SERVICE");
     opts.optopt("u", "url-file", "read feed URLs from FILE", "FILE");
+    opts.optopt(
+        "",
+        "visibility",
+        "post visibility (when service supports it)",
+        "VISIBILITY",
+    );
     opts.optopt(
         "w",
         "wait",
@@ -142,6 +149,10 @@ fn try_main() -> eyre::Result<()> {
         .map(|s| s.parse())
         .collect::<Result<Vec<Service>, _>>()?;
 
+    let post_visibility = matches
+        .opt_get("visibility")?
+        .unwrap_or_else(|| Visibility::Unlisted);
+
     if matches.opt_present("r") {
         if access_mode == AccessMode::ReadOnly {
             bail!("registration cannot be run in dry-run mode");
@@ -179,6 +190,7 @@ fn try_main() -> eyre::Result<()> {
             access_mode,
             cond_req,
             delay,
+            post_visibility,
             services: &services,
             feed_urls: &urls,
         };
@@ -216,6 +228,7 @@ fn list_services(db: &Database, client: &Client) -> eyre::Result<()> {
                 let instance = state.instance.clone();
                 let mastodon = Mastodon {
                     access_mode: AccessMode::ReadOnly,
+                    post_visibility: Visibility::Unlisted,
                     state,
                 };
                 let account = mastodon.verify_credentials(client)?;
@@ -247,6 +260,7 @@ fn run(db: &Database, client: Client, settings: FeedParrot<'_>) -> eyre::Result<
                     let state: MastodonState = rmp_serde::from_slice(&service_data.data)?;
                     Ok(Box::from(Mastodon {
                         access_mode: settings.access_mode,
+                        post_visibility: settings.post_visibility,
                         state,
                     }) as Box<dyn SocialNetwork>)
                 }
