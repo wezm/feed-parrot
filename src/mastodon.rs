@@ -7,7 +7,7 @@ use std::io::Write;
 use std::{io, iter};
 
 use eyre::{eyre, Context};
-use models::MastodonState;
+use models::{MastodonState, NewMedia};
 use redb::Database;
 use reqwest::blocking::Client as HttpClient;
 use unicode_segmentation::UnicodeSegmentation;
@@ -73,16 +73,38 @@ impl SocialNetwork for Mastodon {
     fn prepare_post(&self, item: &NewFeedItem) -> eyre::Result<PotentialPost> {
         let text = toot_text_from_post(item, MAX_LEN)
             .ok_or_else(|| eyre!("Unable to compose toot for {:?}", item))?;
-        Ok(PotentialPost(text, item.guid()))
+        Ok(PotentialPost {
+            text,
+            guid: item.guid(),
+            image: item.image.clone(),
+        })
     }
 
     fn publish_post(&self, http: &HttpClient, post: ReadyPost) -> eyre::Result<Posted> {
         info!("Post: {}", post.text());
 
         if self.is_writeable() {
+            let media = if let Some(image) = post.image() {
+                // There is an image to attach to this post. First thing we need to do is fetch
+                // it.
+                debug!("fetching {}", image.url.as_str());
+                let fetched = self.fetch_image(http, image)?;
+
+                // Now upload it
+                let new_media = NewMedia {
+                    file: fetched.path(),
+                    mime: fetched.content_type.as_ref(),
+                    description: image.alt.clone(),
+                    focus: None,
+                };
+                Some(client::upload_media(http, &self.state, new_media)?)
+            } else {
+                None
+            };
+
             let status = NewStatus {
                 status: post.text().to_string(),
-                media_ids: Vec::new(),
+                media_ids: media.into_iter().map(|media| media.id).collect(),
                 in_reply_to_id: None,
                 sensitive: false,
                 spoiler_text: None,
@@ -292,6 +314,7 @@ mod tests {
             summary: Some("This is the summary of the post".to_string()),
             content: Some("This is the content of the post".to_string()),
             tags: vec!["tag1".to_string(), "tag2".to_string()],
+            image: None,
             date_published: Some(
                 DateTime::parse_from_rfc2822("Wed, 18 Feb 2015 23:16:09 GMT")
                     .unwrap()
@@ -359,6 +382,7 @@ mod tests {
             summary: Some("This is the summary of the post".to_string()),
             content: Some("This is the content of the post".to_string()),
             tags: vec!["tag1".to_string(), "tag2".to_string()],
+            image: None,
             date_published: Some(DateTime::parse_from_rfc2822("Wed, 18 Feb 2015 23:16:09 GMT").unwrap().to_utc()),
             date_modified: None,
         };

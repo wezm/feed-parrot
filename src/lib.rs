@@ -14,9 +14,10 @@ pub mod twitter;
 
 use std::env::VarError;
 use std::ffi::OsStr;
+use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::time::Duration;
-use std::{env, fmt};
+use std::{env, fmt, fs};
 
 pub fn env_var<K: AsRef<OsStr>>(key: K) -> Result<String, ErrorMessage> {
     env::var(&key).map_err(|err| match err {
@@ -36,6 +37,24 @@ pub struct Delay(Duration);
 
 #[derive(Debug)]
 pub struct ErrorMessage(pub String);
+
+struct RmOnDrop(PathBuf);
+
+impl RmOnDrop {
+    fn new(path: PathBuf) -> Self {
+        RmOnDrop(path)
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for RmOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.0);
+    }
+}
 
 impl fmt::Display for ErrorMessage {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

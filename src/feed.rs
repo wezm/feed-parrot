@@ -4,6 +4,7 @@ use atom_syndication as atom;
 use chrono::{DateTime, ParseResult, Utc};
 use mime::Mime;
 use rss::Channel;
+use url::Url;
 
 use crate::json_feed::{self, JsonFeed};
 
@@ -23,11 +24,18 @@ pub struct NewFeedItem {
     pub summary: Option<String>,
     pub content: Option<String>,
     pub tags: Vec<String>,
+    pub image: Option<Image>,
     pub date_published: Option<DateTime<Utc>>,
     pub date_modified: Option<DateTime<Utc>>,
 }
 
 pub struct PostGuid(String);
+
+#[derive(Debug, Clone)]
+pub struct Image {
+    pub url: Url,
+    pub alt: Option<String>,
+}
 
 impl PostGuid {
     pub(crate) fn as_str(&self) -> &str {
@@ -66,6 +74,7 @@ impl From<atom::Entry> for NewFeedItem {
                 .into_iter()
                 .filter_map(|cat| cat.scheme.is_none().then_some(cat.term))
                 .collect(),
+            image: None,
             date_published: entry.published.map(|published| published.to_utc()),
             date_modified: Some(entry.updated.to_utc()),
         }
@@ -233,6 +242,7 @@ impl TryFrom<rss::Item> for NewFeedItem {
                 .into_iter()
                 .filter_map(|cat| cat.domain.is_none().then_some(cat.name))
                 .collect(),
+            image: None,
             date_published,      // FIXME: Handle atom:published
             date_modified: None, // FIXME: Handle atom:updated
         })
@@ -247,6 +257,17 @@ impl From<json_feed::Item> for NewFeedItem {
         let date_modified = item
             .date_modified
             .and_then(|mod_date| parse_rfc2822(&mod_date).ok());
+        let image = item.image.and_then(|url| match url.parse() {
+            Ok(url) => {
+                let alt = item.extensions.and_then(|ext| ext.image_alt);
+                Some(Image { url, alt })
+            }
+            Err(err) => {
+                warn!("unable to parse image URL in feed item: {err}");
+                None
+            }
+        });
+
         NewFeedItem {
             guid: item.id,
             url: item.url,
@@ -257,6 +278,7 @@ impl From<json_feed::Item> for NewFeedItem {
             date_published,
             date_modified,
             tags: item.tags,
+            image,
         }
     }
 }

@@ -504,7 +504,7 @@ mod null_twitter {
             false
         }
 
-        fn prepare_post(&self, item: &NewFeedItem) -> eyre::Result<PotentialPost> {
+        fn prepare_post(&self, _item: &NewFeedItem) -> eyre::Result<PotentialPost> {
             bail!("Twitter support is not enabled")
         }
 

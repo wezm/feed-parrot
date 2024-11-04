@@ -44,6 +44,8 @@ pub struct Item {
     #[serde(default)]
     pub attachments: Vec<Attachment>,
     pub tags: Vec<String>,
+    #[serde(rename = "_feed_parrot")]
+    pub extensions: Option<ItemExtensions>,
 }
 
 #[derive(Deserialize, Clone)]
@@ -53,4 +55,10 @@ pub struct Attachment {
     pub title: Option<String>,
     pub size_in_bytes: Option<u64>,
     pub duration_in_seconds: Option<u64>,
+}
+
+#[derive(Deserialize, Clone)]
+pub struct ItemExtensions {
+    pub about: String,
+    pub image_alt: Option<String>,
 }

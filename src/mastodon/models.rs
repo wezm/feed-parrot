@@ -1,6 +1,10 @@
-use std::fmt::{self, format};
+#![allow(unused)]
+
+use std::fmt::{self};
+use std::path::Path;
 
 use chrono::{DateTime, Utc};
+use mime::Mime;
 use serde::de::{self, Visitor};
 use serde::{Deserialize, Deserializer, Serialize};
 use std::str::FromStr;
@@ -68,6 +72,24 @@ pub(crate) struct NewStatus {
     // scheduled_at: Option<DateTime<Utc>>,
 }
 
+pub(crate) struct NewMedia<'a> {
+    /// The file to be attached, encoded using multipart form data.
+    ///
+    /// The file must have a MIME type.
+    pub(crate) file: &'a Path,
+    /// MIME type of the file if known
+    pub(crate) mime: Option<&'a Mime>,
+    // /// The custom thumbnail of the media to be attached, encoded using multipart form data.
+    // pub(crate) thumbnail: Option<String>,
+    /// A plain-text description of the media, for accessibility purposes.
+    pub(crate) description: Option<String>,
+    /// Two floating points (x,y), comma-delimited, ranging from -1.0 to 1.0.
+    ///
+    /// See [Focal points for cropping media thumbnails](https://docs.joinmastodon.org/api/guidelines/#focal-points)
+    /// for more information.
+    pub(crate) focus: Option<String>,
+}
+
 #[derive(Deserialize)]
 pub(crate) struct Status {
     #[serde(deserialize_with = "de_id")]
@@ -85,6 +107,16 @@ pub(crate) struct Status {
 #[derive(Deserialize)]
 struct MediaAttachment {
     description: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct NewMediaAttachment {
+    pub(crate) id: String,
+    #[serde(rename = "type")]
+    pub(crate) type_: String,
+    pub(crate) url: Option<Url>,
+    pub(crate) description: Option<String>,
+    pub(crate) blurhash: Option<String>,
 }
 
 #[derive(Deserialize)]

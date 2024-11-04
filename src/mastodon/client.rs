@@ -5,7 +5,7 @@ use std::io::Write;
 use eyre::{eyre, Context};
 use log::{debug, error};
 use mime::APPLICATION_JSON;
-use reqwest::blocking::{Client, Response};
+use reqwest::blocking::{multipart, Client, Response};
 use reqwest::header::{ACCEPT, AUTHORIZATION};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -14,7 +14,9 @@ use url::Url;
 
 use crate::mastodon::models::{MastodonState, NewStatus};
 
-const SCOPES: &str = "write:statuses read:accounts";
+use super::models::NewMedia;
+
+const SCOPES: &str = "write:statuses write:media read:accounts";
 const REDIRECT_URI: &str = "urn:ietf:wg:oauth:2.0:oob";
 
 #[derive(Deserialize)]
@@ -154,6 +156,42 @@ pub fn verify_credentials(
         .send()?;
     let account: super::models::CredentialAccount = json_or_error(resp)?;
     Ok(account)
+}
+
+pub fn upload_media(
+    client: &Client,
+    state: &MastodonState,
+    media: NewMedia,
+) -> eyre::Result<super::models::NewMediaAttachment> {
+    let url = state.instance.join("/api/v2/media")?;
+    let bearer_token = format!("Bearer {}", state.access_token);
+
+    // We need to stream a multipart form date request
+    let mut file_part = multipart::Part::file(&media.file)?;
+    let mut form = multipart::Form::new();
+    if let Some(desc) = media.description {
+        form = form.text("description", desc);
+    }
+    if let Some(focus) = media.focus {
+        form = form.text("focus", focus);
+    }
+
+    // If there's no extension to guess the mime type from then use the supplied type
+    match (media.file.extension(), media.mime) {
+        (None, Some(mime)) => file_part = file_part.mime_str(mime.as_ref())?,
+        _ => {}
+    }
+    form = form.part("file", file_part);
+
+    debug!("uploading media at: {}", media.file.display());
+    let resp = client
+        .post(url.clone())
+        .header(AUTHORIZATION, &bearer_token)
+        .header(ACCEPT, APPLICATION_JSON.essence_str())
+        .multipart(form)
+        .send()?;
+    let new_media: super::models::NewMediaAttachment = json_or_error(resp)?;
+    Ok(new_media)
 }
 
 fn json_or_error<T: DeserializeOwned>(response: Response) -> eyre::Result<T> {

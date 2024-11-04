@@ -1,10 +1,18 @@
+use std::fs::File;
+use std::path::{Path, PathBuf};
+use std::{env, io};
+
 use chrono::{DateTime, Utc};
+use eyre::OptionExt;
+use mime::Mime;
 use redb::Database;
 use reqwest::blocking::Client;
+use reqwest::header;
 
 use crate::db::{self, AlreadyPosted};
-use crate::feed::{NewFeedItem, PostGuid};
+use crate::feed::{Image, NewFeedItem, PostGuid};
 use crate::models::Service;
+use crate::RmOnDrop;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessMode {
@@ -17,12 +25,17 @@ pub trait Registration {
 }
 
 /// A potential post for sending
-pub struct PotentialPost(pub String, pub PostGuid);
+pub struct PotentialPost {
+    pub text: String,
+    pub guid: PostGuid,
+    pub image: Option<Image>,
+}
 
 /// A post that is ready for sending
 pub struct ReadyPost {
     text: String,
     guid: PostGuid,
+    image: Option<Image>,
     hash: blake3::Hash,
 }
 
@@ -30,6 +43,7 @@ pub struct ReadyPost {
 pub struct Posted {
     pub text: String,
     pub guid: PostGuid,
+    pub image: Option<Image>,
     pub hash: blake3::Hash,
     pub at: DateTime<Utc>,
 }
@@ -40,14 +54,20 @@ pub enum ValidationResult {
     Error(redb::Error),
 }
 
+pub struct FetchedImage {
+    path: RmOnDrop,
+    pub(crate) content_type: Option<Mime>,
+}
+
 impl PotentialPost {
     // FIXME: Bind the result to the service
     pub fn validate(self, db: &Database, service: Service) -> ValidationResult {
         // Check that that is a new post
-        match db::already_posted(db, service, &self.0) {
+        match db::already_posted(db, service, &self.text) {
             Ok(AlreadyPosted::No(hash)) => ValidationResult::Ok(ReadyPost {
-                text: self.0,
-                guid: self.1,
+                text: self.text,
+                guid: self.guid,
+                image: self.image,
                 hash,
             }),
             Ok(AlreadyPosted::Yes) => ValidationResult::Duplicate(self),
@@ -61,8 +81,8 @@ impl ReadyPost {
         &self.text
     }
 
-    pub(crate) fn into_text(self) -> String {
-        self.text
+    pub(crate) fn image(&self) -> Option<&Image> {
+        self.image.as_ref()
     }
 
     pub(crate) fn hash(&self) -> blake3::Hash {
@@ -75,6 +95,7 @@ impl From<ReadyPost> for Posted {
         Posted {
             text: post.text,
             guid: post.guid,
+            image: post.image,
             hash: post.hash,
             at: Utc::now(),
         }
@@ -89,6 +110,59 @@ pub trait SocialNetwork: Send + Sync {
     fn prepare_post(&self, item: &NewFeedItem) -> eyre::Result<PotentialPost>;
 
     fn publish_post(&self, client: &Client, post: ReadyPost) -> eyre::Result<Posted>;
+
+    fn fetch_image(&self, client: &Client, image: &Image) -> eyre::Result<FetchedImage> {
+        let mut rand = [0u8; 8];
+        getrandom::getrandom(&mut rand)?;
+        let rand = u64::from_le_bytes(rand);
+
+        // Set up the temp file to download to
+        let file_name = image
+            .url
+            .path_segments()
+            .ok_or_eyre("no path segments")?
+            .last()
+            .and_then(|last| {
+                let path = Path::new(last);
+                let ext = path.extension();
+                let mut new_name = path.file_stem()?.to_os_string();
+                new_name.push("-");
+                new_name.push(format!("{:x}", rand));
+                if let Some(ext) = ext {
+                    new_name.push(".");
+                    new_name.push(ext);
+                }
+                Some(PathBuf::from(new_name))
+            })
+            .unwrap_or_else(|| PathBuf::from(format!("feed-parrot-temp-file-{:x}", rand)));
+        let path = RmOnDrop::new(env::temp_dir().join(&file_name));
+        let mut file = File::create(path.path())?;
+
+        // Download the file
+        debug!(
+            "downloading image at {} to {}",
+            image.url.as_str(),
+            path.path().display()
+        );
+        let mut response = client.get(image.url.as_str()).send()?;
+
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|val| {
+                let mime_str = std::str::from_utf8(val.as_bytes()).ok()?;
+                mime_str.parse::<Mime>().ok()
+            });
+        io::copy(&mut response, &mut file)?;
+
+        Ok(FetchedImage { path, content_type })
+    }
+}
+
+impl FetchedImage {
+    pub fn path(&self) -> &Path {
+        self.path.path()
+    }
 }
 
 /// Turn tags with spaces and dashes into PascalCase
