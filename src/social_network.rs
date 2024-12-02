@@ -205,6 +205,7 @@ static SPECIAL_CASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::
         ("nodejs", "NodeJS"),
         ("oled", "OLED"),
         ("openbsd", "OpenBSD"),
+        ("pdf", "PDF"),
         ("php", "PHP"),
         ("powerpc", "PowerPC"),
         ("ppc", "PPC"),
