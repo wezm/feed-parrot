@@ -1,5 +1,7 @@
+use std::collections::HashMap;
 use std::fs::File;
 use std::path::{Path, PathBuf};
+use std::sync::LazyLock;
 use std::{env, io};
 
 use chrono::{DateTime, Utc};
@@ -170,7 +172,70 @@ pub fn process_tags(raw_tags: &[String]) -> Vec<String> {
     raw_tags.iter().map(|tag| process_tag(tag)).collect()
 }
 
+static SPECIAL_CASES: LazyLock<HashMap<&'static str, &'static str>> = LazyLock::new(|| {
+    IntoIterator::into_iter([
+        ("amd", "AMD"),
+        ("arm", "ARM"),
+        ("cad", "CAD"),
+        ("cli", "CLI"),
+        ("cpu", "CPU"),
+        ("css", "CSS"),
+        ("ext2", "ext2"),
+        ("ext3", "ext3"),
+        ("ext4", "ext4"),
+        ("fosdem", "FOSDEM"),
+        ("freebsd", "FreeBSD"),
+        ("gnu", "GNU"),
+        ("gpl", "GPL"),
+        ("gpu", "GPU"),
+        ("html", "HTML"),
+        ("http", "HTTP"),
+        ("ibook", "iBook"),
+        ("imac", "iMac"),
+        ("imap", "IMAP"),
+        ("ios", "iOS"),
+        ("ipad", "iPad"),
+        ("iphone", "iPhone"),
+        ("ipod", "iPod"),
+        ("javascript", "JavaScript"),
+        ("llvm", "LLVM"),
+        ("macos", "macOS"),
+        ("netbsd", "NetBSD"),
+        ("node-js", "NodeJS"),
+        ("nodejs", "NodeJS"),
+        ("oled", "OLED"),
+        ("openbsd", "OpenBSD"),
+        ("php", "PHP"),
+        ("powerpc", "PowerPC"),
+        ("ppc", "PPC"),
+        ("pwa", "PWA"),
+        ("qnx", "QNX"),
+        ("quicktime", "QuickTime"),
+        ("raid", "RAID"),
+        ("rfc", "RFC"),
+        ("riscv", "RISCV"),
+        ("rss", "RSS"),
+        ("sql", "SQL"),
+        ("tls", "TLS"),
+        ("tui", "TUI"),
+        ("typescript", "TypeScript"),
+        ("uefi", "UEFI"),
+        ("unix", "UNIX"),
+        ("usb", "USB"),
+        ("vpn", "VPN"),
+        ("webdev", "WebDev"),
+        ("xfs", "XFS"),
+        ("zfs", "ZFS"),
+    ])
+    .collect()
+});
+
 fn process_tag(raw_tag: &str) -> String {
+    // Special handling for specific tags
+    if let Some(replacement) = SPECIAL_CASES.get(raw_tag) {
+        return replacement.to_string();
+    }
+
     let split_chars = |c: char| c.is_ascii_punctuation() || c.is_whitespace();
     if !raw_tag.chars().any(split_chars) {
         return ucfirst(raw_tag);
@@ -217,5 +282,12 @@ mod tests {
         assert_eq!(process_tag("écalgrain bay"), "ÉcalgrainBay".to_string());
         assert_eq!(process_tag("καῦνος"), "Καῦνος".to_string());
         assert_eq!(process_tag("العربية"), "العربية".to_string());
+    }
+
+    #[test]
+    fn test_process_tag_special_cases() {
+        assert_eq!(process_tag("openbsd"), "OpenBSD".to_string());
+        assert_eq!(process_tag("node-js"), "NodeJS".to_string());
+        assert_eq!(process_tag("macos"), "macOS".to_string());
     }
 }
