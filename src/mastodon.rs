@@ -136,6 +136,7 @@ fn toot_text_from_post(item: &NewFeedItem, max_len: usize) -> Option<String> {
         .or(item.summary.as_deref())
         .map(Cow::from);
     let link = item.url.as_deref();
+    let external_link = item.external_url.as_deref();
 
     if content.is_none() && link.is_none() {
         return None;
@@ -143,7 +144,7 @@ fn toot_text_from_post(item: &NewFeedItem, max_len: usize) -> Option<String> {
 
     // Compose the toot
     let hashtags = (!hashtags.is_empty()).then(|| hashtags.as_str());
-    let mut toot = assemble_text(content.as_deref(), link, hashtags);
+    let mut toot = assemble_text(content.as_deref(), link, external_link, hashtags);
 
     // TODO: Require a minimum amount of content and remove hash tags if needed
     // TODO: Do word based truncation and fall back on character based if necessary
@@ -159,7 +160,7 @@ fn toot_text_from_post(item: &NewFeedItem, max_len: usize) -> Option<String> {
                 .take(target_len)
                 .chain(iter::once("…"))
                 .collect::<String>();
-            toot = assemble_text(Some(&trimmed), link, hashtags);
+            toot = assemble_text(Some(&trimmed), link, external_link, hashtags);
         } else {
             // Not enough content to trim
             return None;
@@ -272,16 +273,34 @@ fn replace_entities<'a, 'e, I>(string: &'a str, entities: I) -> ReplaceEntities<
     }
 }
 
-fn assemble_text(content: Option<&str>, link: Option<&str>, hashtags: Option<&str>) -> String {
+fn assemble_text(
+    content: Option<&str>,
+    link: Option<&str>,
+    external_link: Option<&str>,
+    hashtags: Option<&str>,
+) -> String {
     let mut text = String::new();
     if let Some(content) = content {
         text.push_str(&content);
     }
-    if let Some(link) = link {
-        if !text.is_empty() {
+    match (link, external_link) {
+        (Some(link), Some(external_link)) => {
+            if !text.is_empty() {
+                text.push_str("\n\n");
+            }
+            text.push_str("Commentary: ");
+            text.push_str(link);
             text.push('\n');
+            text.push_str("Link: ");
+            text.push_str(external_link);
         }
-        text.push_str(link)
+        (Some(link), None) | (None, Some(link)) => {
+            if !text.is_empty() {
+                text.push('\n');
+            }
+            text.push_str(link)
+        }
+        (None, None) => {}
     }
     if let Some(hashtags) = hashtags {
         if !text.is_empty() {
@@ -309,6 +328,7 @@ mod tests {
         let mut item = NewFeedItem {
             guid: "text".to_string(),
             url: Some("https://example.com".to_string()),
+            external_url: None,
             title: Some("This is the title of the post".to_string()),
             author: Some("Raymond Holt".to_string()),
             summary: Some("This is the summary of the post".to_string()),
@@ -377,6 +397,7 @@ mod tests {
         let item = NewFeedItem {
             guid: "text".to_string(),
             url: Some("https://example.com/this/is/a/very/long/url?but=it-only-counts-for-23-characters".to_string()),
+            external_url: None,
             title: Some("This is the title of the post 👨‍👩‍👧‍👦. For some reason it's a really long title that is more than the limit allowed. It goes on and on. However URLs only count for 23 characters no matter how long they are.".to_string()),
             author: Some("Raymond Holt".to_string()),
             summary: Some("This is the summary of the post".to_string()),
@@ -389,6 +410,33 @@ mod tests {
 
         let text = toot_text_from_post(&item, MAX_LEN).unwrap();
         assert_eq!(text, "This is the title of the post 👨\u{200d}👩\u{200d}👧\u{200d}👦. For some reason it's a really…\nhttps://example.com/this/is/a/very/long/url?but=it-only-counts-for-23-characters\n\n#Tag1 #Tag2");
+    }
+
+    #[test]
+    fn toot_text_from_post_with_external_url() {
+        let item = NewFeedItem {
+            guid: "text".to_string(),
+            url: Some("https://example.com/the-post-on-my-site".to_string()),
+            external_url: Some("https://linkedlist.org/".to_string()),
+            title: Some("This is the title of the post".to_string()),
+            author: Some("Wesley Moore".to_string()),
+            summary: Some("This is the summary of the post".to_string()),
+            content: Some("This is the content of the post".to_string()),
+            tags: vec!["tag1".to_string(), "tag2".to_string()],
+            image: None,
+            date_published: Some(
+                DateTime::parse_from_rfc2822("Sat, 19 Apr 2025 23:16:09 GMT")
+                    .unwrap()
+                    .to_utc(),
+            ),
+            date_modified: None,
+        };
+
+        let text = toot_text_from_post(&item, 500).unwrap();
+        assert_eq!(
+            text,
+            "This is the title of the post\n\nCommentary: https://example.com/the-post-on-my-site\nLink: https://linkedlist.org/\n\n#Tag1 #Tag2"
+        );
     }
 
     #[test]

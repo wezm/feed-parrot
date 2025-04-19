@@ -19,6 +19,7 @@ pub enum ParsedFeed {
 pub struct NewFeedItem {
     pub guid: String, // TODO: Ensure not empty
     pub url: Option<String>,
+    pub external_url: Option<String>,
     pub title: Option<String>,
     pub author: Option<String>,
     pub summary: Option<String>,
@@ -65,6 +66,7 @@ impl From<atom::Entry> for NewFeedItem {
         NewFeedItem {
             guid: entry.id,
             url,
+            external_url: None,
             title: Some(entry.title.value), // FIXME: This can be HTML as well; handle that
             author: (!author.is_empty()).then_some(author),
             summary: entry.summary.map(|summary| summary.value), // FIXME: This can be HTML as well; handle that
@@ -233,6 +235,7 @@ impl TryFrom<rss::Item> for NewFeedItem {
                 .map(|guid| guid.value)
                 .ok_or_else(|| TryFromRssItemError::NoGuid)?,
             url: item.link,
+            external_url: None,
             title: item.title,
             author: item.author,
             summary: item.description,
@@ -271,6 +274,7 @@ impl From<json_feed::Item> for NewFeedItem {
         NewFeedItem {
             guid: item.id,
             url: item.url,
+            external_url: item.external_url,
             title: item.title,
             author: item.author.and_then(|author| author.name),
             summary: item.summary,
