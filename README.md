@@ -25,7 +25,7 @@
 > had planned to iterate more and polish it up before release, but I've been
 > focussed on other things. I decided to make the repo public after seeing
 > [this toot on Mastodon](https://social.coop/@cwebber/116388218994033873).
-> It is responsible for all the posts to
+> Feed Parrot is responsible for all the posts to
 > [@linkedlist](https://mastodon.decentralised.social/@linkedlist). I will
 > review PRs, but I am not accepting feature requests.
 
