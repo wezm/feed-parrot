@@ -8,6 +8,7 @@
   more.</strong>
 </div>
 
+<!--
 <br>
 
 <div align="center">
@@ -15,8 +16,18 @@
   <a href="https://crates.io/crates/feed-parrot"><img src="https://img.shields.io/crates/v/feed-parrot.svg" alt="Version"></a>
   <img src="https://img.shields.io/crates/l/feed-parrot.svg" alt="License">
 </div>
+-->
 
 <br>
+
+> [!NOTE]  
+> **Status and Maintenance:** Feed Parrot works, but is in maintenance mode. I
+> had planned to iterate more and polish it up before release, but I've been
+> focussed on other things. I decided to make the repo public after seeing
+> [this toot on Mastodon](https://social.coop/@cwebber/116388218994033873).
+> It is responsible for all the posts to
+> [@linkedlist](https://mastodon.decentralised.social/@linkedlist). I will
+> review PRs, but I am not accepting feature requests.
 
 TODO: Write longer description here.
 
@@ -25,6 +36,7 @@ TODO: Include rationale/motivation/goals
 Install
 -------
 
+<!--
 ### Pre-compiled Binary
 
 Pre-compiled binaries are available for a number of platforms:
@@ -36,6 +48,7 @@ Pre-compiled binaries are available for a number of platforms:
 * Windows x86\_64
 
 Check the [latest release] for download links.
+-->
 
 ### From Source
 
@@ -200,6 +213,8 @@ Credits
 
 TODO
 
+-->
+
 Licence
 -------
 
@@ -210,7 +225,6 @@ This project is dual licenced under either of:
 
 at your option.
 
--->
 
 [rustup]: https://www.rust-lang.org/tools/install
 [env_logger]: https://docs.rs/env_logger/0.11.3/env_logger/index.html
